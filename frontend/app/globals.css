@@ -1,1 +1,9 @@
 @import "tailwindcss";
+
+@theme {
+  /* Brand Theme Tokens (Tailwind v4 standard configuration syntax) */
+  --color-primary: #0f172a;
+  --color-secondary: #475569;
+
+  /* The engine automatically scans app/, components/, hooks/, etc. natively */
+}
