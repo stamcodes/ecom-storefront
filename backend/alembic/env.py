@@ -1,22 +1,26 @@
 from logging.config import fileConfig
 import os
 
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+
+load_dotenv()  # loads variables from backend/.env into os.environ
 
 config = context.config
 
 # Override sqlalchemy.url from the DATABASE_URL environment variable
 database_url = os.getenv("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+if not database_url:
+    raise RuntimeError("DATABASE_URL is not set. Check your .env file.")
+config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 from app.database.base import Base
-from app.models import * # This pulls in every model registered in __init__.py
+from app.models import *  # This pulls in every model registered in __init__.py
 target_metadata = Base.metadata
 
 
