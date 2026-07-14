@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from sqlalchemy import text
+from app.seed import seed_database
 import app.models
 from app.database.session import engine 
 from app.core.config import settings

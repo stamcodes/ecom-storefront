@@ -1,27 +1,27 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.database.session import get_db
 from app.models.user import User
-from app.schemas.auth import LoginRequest, Token
-from app.core.jwt import create_access_token
-from app.core.security import verify_password
-from app.core.auth import get_current_user
-from app.schemas.auth import LoginRequest, Token, ForgotPasswordRequest
-from app.core.security import verify_password, hash_password
+from app.models.role import Role
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
+from app.schemas.auth import LoginRequest, Token, ForgotPasswordRequest
+from app.core.jwt import create_access_token
+from app.core.security import verify_password, hash_password
+from app.core.auth import get_current_user
+from pydantic import BaseModel
 
 router = APIRouter()
-
+class MsgResponse(BaseModel):
+    message: str
 
 @router.post("/login", response_model=Token)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user = (
-        db.query(User)
-        .filter(User.email == payload.email)
-        .first()
-    )
+async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+    stmt = select(User).where(User.email == payload.email)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(
@@ -54,18 +54,20 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         token_type="bearer"
     )
 
+
+
 @router.get("/me")
-def get_me(
+async def get_me(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    permission_rows = (
-        db.query(Permission.name)
+    stmt = (
+        select(Permission.name)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
-        .filter(RolePermission.role_id == current_user.role_id)
-        .all()
+        .where(RolePermission.role_id == current_user.role_id)
     )
-    permissions = [row[0] for row in permission_rows]
+    result = await db.execute(stmt)
+    permissions = list(result.scalars().all())
 
     return {
         "id": current_user.id,
@@ -83,13 +85,12 @@ def get_me(
         "permissions": permissions,
     }
 
-@router.post("/forgot-password", response_model=Token)
-def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    user = (
-        db.query(User)
-        .filter(User.email == payload.email)
-        .first()
-    )
+
+@router.post("/forgot-password", response_model=MsgResponse)
+async def forgot_password(payload: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    stmt = select(User).where(User.email == payload.email)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(
@@ -103,19 +104,11 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
             detail="User account is inactive"
         )
 
+    # Hash and save the updated password safely
     user.password = hash_password(payload.new_password)
-    db.commit()
-    db.refresh(user)
+    await db.commit()
 
-    access_token = create_access_token(
-        {
-            "sub": str(user.id),
-            "email": user.email,
-            "role_id": user.role_id
-        }
-    )
-
-    return Token(
-        access_token=access_token,
-        token_type="bearer"
+    # Clean response: Force the user to log in manually with their new credentials
+    return MsgResponse(
+        message="Password updated successfully. Please log in with your new credentials."
     )
