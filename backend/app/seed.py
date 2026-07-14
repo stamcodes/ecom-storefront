@@ -1,12 +1,13 @@
-# app/seed.py
-
-from app.database.session import SessionLocal
+import uuid
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from app.database.session import AsyncSessionLocal
 from app.models.role import Role
 from app.models.user import User
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
+from app.models.branch import Branch
 from app.core.security import hash_password
-
 
 RESOURCES = [
     "users", "roles", "branches", "permissions",
@@ -15,102 +16,128 @@ RESOURCES = [
 ]
 ACTIONS = ["create", "read", "update", "delete"]
 
-ROLES = ["admin", "manager", "staff"]
+# Updated to include our storefront target
+ROLES = ["admin", "manager", "staff", "customer"]
 
-# Which actions each role gets, per resource. Applied uniformly across all resources for now.
 ROLE_ACTIONS = {
     "admin": ["create", "read", "update", "delete"],
     "manager": ["create", "read", "update"],
     "staff": ["read"],
+    "customer": ["read"], # Storefront customers can only view catalog items natively
 }
 
-
-def get_or_create_role(db, name, description):
-    role = db.query(Role).filter(Role.name == name).first()
+async def get_or_create_role(db: AsyncSession, name: str, description: str) -> Role:
+    result = await db.execute(select(Role).filter(Role.name == name))
+    role = result.scalar_one_or_none()
     if not role:
-        role = Role(name=name, description=description)
+        role = Role(id=uuid.uuid4(), name=name, description=description)
         db.add(role)
-        db.commit()
-        db.refresh(role)
+        await db.commit()
+        await db.refresh(role)
         print(f"Created role: {role.name} (id={role.id})")
     else:
         print(f"Role already exists: {role.name} (id={role.id})")
     return role
 
-
-def get_or_create_permission(db, name, description):
-    perm = db.query(Permission).filter(Permission.name == name).first()
+async def get_or_create_permission(db: AsyncSession, name: str, description: str) -> Permission:
+    result = await db.execute(select(Permission).filter(Permission.name == name))
+    perm = result.scalar_one_or_none()
     if not perm:
-        perm = Permission(name=name, description=description)
+        perm = Permission(id=uuid.uuid4(), name=name, description=description)
         db.add(perm)
-        db.commit()
-        db.refresh(perm)
+        await db.commit()
+        await db.refresh(perm)
     return perm
 
-
-def link_role_permission(db, role_id, permission_id):
-    exists = db.query(RolePermission).filter(
-        RolePermission.role_id == role_id,
-        RolePermission.permission_id == permission_id
-    ).first()
+async def link_role_permission(db: AsyncSession, role_id: uuid.UUID, permission_id: uuid.UUID) -> None:
+    result = await db.execute(
+        select(RolePermission).filter(
+            RolePermission.role_id == role_id,
+            RolePermission.permission_id == permission_id
+        )
+    )
+    exists = result.scalar_one_or_none()
     if not exists:
-        db.add(RolePermission(role_id=role_id, permission_id=permission_id))
+        db.add(RolePermission(id=uuid.uuid4(), role_id=role_id, permission_id=permission_id))
 
+async def seed_database(db: AsyncSession) -> None:
+    """
+    Idempotent asynchronous database seeder managing RBAC systems, 
+    the Customer tier, and our Online Store branch target.
+    """
+    print("Checking database for seed records...")
 
-def seed():
-    db = SessionLocal()
+    # 1. Create all roles asynchronously
+    role_objs = {}
+    for role_name in ROLES:
+        role_objs[role_name] = await get_or_create_role(
+            db, role_name, f"{role_name.capitalize()} role"
+        )
 
-    try:
-        # 1. Create roles
-        role_objs = {}
-        for role_name in ROLES:
-            role_objs[role_name] = get_or_create_role(
-                db, role_name, f"{role_name.capitalize()} role"
+    # 2. Create all permissions (resource:action)
+    permission_objs = {}
+    for resource in RESOURCES:
+        for action in ACTIONS:
+            perm_name = f"{resource}:{action}"
+            permission_objs[perm_name] = await get_or_create_permission(
+                db, perm_name, f"Can {action} {resource}"
             )
+    await db.commit()
+    print(f"Ensured {len(permission_objs)} permissions exist")
 
-        # 2. Create all permissions (resource:action)
-        permission_objs = {}
+    # 3. Link roles to permissions
+    for role_name, allowed_actions in ROLE_ACTIONS.items():
+        role = role_objs[role_name]
         for resource in RESOURCES:
-            for action in ACTIONS:
+            for action in allowed_actions:
                 perm_name = f"{resource}:{action}"
-                permission_objs[perm_name] = get_or_create_permission(
-                    db, perm_name, f"Can {action} {resource}"
-                )
-        db.commit()
-        print(f"Ensured {len(permission_objs)} permissions exist")
+                await link_role_permission(db, role.id, permission_objs[perm_name].id)
+    await db.commit()
+    print("Linked role-permission mappings")
 
-        # 3. Link roles to permissions
-        for role_name, allowed_actions in ROLE_ACTIONS.items():
-            role = role_objs[role_name]
-            for resource in RESOURCES:
-                for action in allowed_actions:
-                    perm_name = f"{resource}:{action}"
-                    link_role_permission(db, role.id, permission_objs[perm_name].id)
-        db.commit()
-        print("Linked role-permission mappings")
+    # 4. Seed the default 'Online Store' Branch
+    branch_query = await db.execute(select(Branch).where(Branch.name == "Online Store"))
+    online_store_branch = branch_query.scalar_one_or_none()
+    if not online_store_branch:
+        print("Creating default 'Online Store' branch...")
+        online_store_branch = Branch(
+            id=uuid.uuid4(),
+            name="Online Store",
+            is_active=True
+        )
+        db.add(online_store_branch)
+        await db.commit()
+    else:
+        print("'Online Store' branch already exists. Skipping.")
 
-        # 4. Create admin user
-        admin_email = "admin@rbac.com"
-        admin_user = db.query(User).filter(User.email == admin_email).first()
+    # 5. Create admin user
+    admin_email = "admin@rbac.com"
+    user_query = await db.execute(select(User).filter(User.email == admin_email))
+    admin_user = user_query.scalar_one_or_none()
 
-        if not admin_user:
-            admin_user = User(
-                name="Admin",
-                email=admin_email,
-                password=hash_password("Admin123!"),
-                is_active=True,
-                role_id=role_objs["admin"].id
-            )
-            db.add(admin_user)
-            db.commit()
-            db.refresh(admin_user)
-            print(f"Created user: {admin_user.email} (id={admin_user.id})")
-        else:
-            print(f"User already exists: {admin_user.email} (id={admin_user.id})")
+    if not admin_user:
+        admin_user = User(
+            id=uuid.uuid4(),
+            full_name="Admin",
+            email=admin_email,
+            hashed_password=hash_password("Admin123!"),
+            is_active=True,
+            role_id=role_objs["admin"].id
+        )
+        db.add(admin_user)
+        await db.commit()
+        await db.refresh(admin_user)
+        print(f"Created user: {admin_user.email} (id={admin_user.id})")
+    else:
+        print(f"User already exists: {admin_user.email} (id={admin_user.id})")
 
-    finally:
-        db.close()
+    print("Seeding checks complete!")
 
+async def run_seed_cli() -> None:
+    """Entry point for manual execution via terminal"""
+    async with AsyncSessionLocal() as session:
+        await seed_database(session)
 
 if __name__ == "__main__":
-    seed()
+    import asyncio
+    asyncio.run(run_seed_cli())

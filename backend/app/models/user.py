@@ -6,9 +6,7 @@ from sqlalchemy import (
     String,
     func
 )
-
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
 from app.database.base import Base
 
 
@@ -31,6 +29,20 @@ class User(Base):
         String(255),
         nullable=False
     )
+
+    # --- NEW STOREFRONT FIELDS ---
+    phone_number: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        default=None
+    )
+
+    avatar_url: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+        default=None
+    )
+    # -----------------------------
 
     is_active: Mapped[bool] = mapped_column(
         Boolean,
@@ -56,7 +68,7 @@ class User(Base):
         onupdate=func.now()
     )
 
-  # Relationships
+    # Relationships
     role = relationship("Role", back_populates="users")
     branch_links: Mapped[list["UserBranch"]] = relationship(
         back_populates="user",
