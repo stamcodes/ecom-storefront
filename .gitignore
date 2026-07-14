@@ -11,6 +11,8 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
 !.env.example
 
 # logs
@@ -31,26 +33,30 @@ next-env.d.ts
 .vercel
 
 # ---------- Python / FastAPI (backend) ----------
-__pycache__/
+# Explicitly target nested __pycache__ and bytecode
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
-venv/
-.venv/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Explicitly target backend virtual environment paths
+backend/venv/
+backend/env/
+backend/.venv/
 
 # alembic (keep versions, ignore local db files)
 *.sqlite3
 *.db
 
 # env files (backend)
-.env
-!.env.example
+backend/.env
+backend/.env.production
+backend/.env.development
 
 # ---------- Editors / OS ----------
 .vscode/
