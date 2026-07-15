@@ -6,13 +6,12 @@ from app.models.role import Role
 from app.models.user import User
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
-from app.models.branch import Branch
 from app.core.security import hash_password
 
 RESOURCES = [
-    "users", "roles", "branches", "permissions",
+    "users", "roles", "permissions",
     "categories", "products", "product_categories",
-    "product_variants", "orders", "order_items", "user_branches"
+    "product_variants", "orders", "order_items"
 ]
 ACTIONS = ["create", "read", "update", "delete"]
 
@@ -62,8 +61,8 @@ async def link_role_permission(db: AsyncSession, role_id: uuid.UUID, permission_
 
 async def seed_database(db: AsyncSession) -> None:
     """
-    Idempotent asynchronous database seeder managing RBAC systems, 
-    the Customer tier, and our Online Store branch target.
+    Idempotent asynchronous database seeder managing RBAC systems
+    and the Customer tier.
     """
     print("Checking database for seed records...")
 
@@ -95,22 +94,7 @@ async def seed_database(db: AsyncSession) -> None:
     await db.commit()
     print("Linked role-permission mappings")
 
-    # 4. Seed the default 'Online Store' Branch
-    branch_query = await db.execute(select(Branch).where(Branch.name == "Online Store"))
-    online_store_branch = branch_query.scalar_one_or_none()
-    if not online_store_branch:
-        print("Creating default 'Online Store' branch...")
-        online_store_branch = Branch(
-            id=uuid.uuid4(),
-            name="Online Store",
-            is_active=True
-        )
-        db.add(online_store_branch)
-        await db.commit()
-    else:
-        print("'Online Store' branch already exists. Skipping.")
-
-    # 5. Create admin user
+    # 4. Create admin user
     admin_email = "admin@rbac.com"
     user_query = await db.execute(select(User).filter(User.email == admin_email))
     admin_user = user_query.scalar_one_or_none()

@@ -16,7 +16,7 @@ router = APIRouter()
 CUSTOMER_ROLE_ID = 4
 
 
-@router.get("/users-test", response_model=list[UserOut])
+@router.get("/users", response_model=list[UserOut])
 async def get_users(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER))
