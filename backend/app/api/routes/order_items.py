@@ -1,49 +1,60 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+﻿from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from app.database.session import get_db
 from app.models.order import Order
 from app.models.product_variant import ProductVariant
 from app.models.order_item import OrderItem
-from app.models.user import User
 from app.schemas.order_item import OrderItemOut, OrderItemCreate, OrderItemUpdate
 from app.core.permissions import require_role, ADMIN, MANAGER, STAFF
 
 router = APIRouter()
 
 
-def recalculate_total(order: Order, db: Session):
-    total = sum(item.quantity * float(item.price_at_purchase) for item in order.items)
+async def recalculate_total(order_id: int, db: AsyncSession) -> None:
+    result = await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))
+    total = sum(item.quantity * float(item.price_at_purchase) for item in result.scalars().all())
+
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        return
+
     order.total_amount = total
-    db.commit()
+    await db.commit()
 
 
 @router.get("/orders/{order_id}/items", response_model=list[OrderItemOut])
-def get_order_items(
+async def get_order_items(
     order_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    order = db.query(Order).filter(Order.id == order_id).first()
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    return db.query(OrderItem).filter(OrderItem.order_id == order_id).all()
+    result = await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))
+    return result.scalars().all()
 
 
 @router.post("/orders/{order_id}/items", response_model=OrderItemOut, status_code=201)
-def add_order_item(
+async def add_order_item(
     order_id: int,
     payload: OrderItemCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    order = db.query(Order).filter(Order.id == order_id).first()
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    variant = db.query(ProductVariant).filter(ProductVariant.id == payload.product_variant_id).first()
+    result = await db.execute(select(ProductVariant).where(ProductVariant.id == payload.product_variant_id))
+    variant = result.scalar_one_or_none()
     if not variant:
         raise HTTPException(status_code=404, detail="Product variant not found")
 
@@ -63,36 +74,40 @@ def add_order_item(
     db.add(new_item)
 
     try:
-        db.commit()
+        await db.commit()
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=400, detail="Invalid product_variant_id")
 
-    db.refresh(new_item)
-    db.refresh(order)
-    recalculate_total(order, db)
-    db.refresh(new_item)
+    await db.refresh(new_item)
+    await recalculate_total(order_id, db)
+    await db.refresh(new_item)
     return new_item
 
 
 @router.put("/order-items/{item_id}", response_model=OrderItemOut)
-def update_order_item(
+async def update_order_item(
     item_id: int,
     payload: OrderItemUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    item = db.query(OrderItem).filter(OrderItem.id == item_id).first()
+    result = await db.execute(select(OrderItem).where(OrderItem.id == item_id))
+    item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Order item not found")
 
     update_data = payload.model_dump(exclude_unset=True)
 
     if "quantity" in update_data:
-        variant = db.query(ProductVariant).filter(ProductVariant.id == item.product_variant_id).first()
+        result = await db.execute(select(ProductVariant).where(ProductVariant.id == item.product_variant_id))
+        variant = result.scalar_one_or_none()
+        if not variant:
+            raise HTTPException(status_code=404, detail="Product variant not found")
+
         old_quantity = item.quantity
         new_quantity = update_data["quantity"]
-        diff = new_quantity - old_quantity  # positive = needs more stock, negative = returns stock
+        diff = new_quantity - old_quantity
 
         if diff > 0 and variant.stock_quantity < diff:
             raise HTTPException(
@@ -105,33 +120,33 @@ def update_order_item(
     for field, value in update_data.items():
         setattr(item, field, value)
 
-    db.commit()
-    db.refresh(item)
-
-    order = db.query(Order).filter(Order.id == item.order_id).first()
-    recalculate_total(order, db)
-    db.refresh(item)
+    await db.commit()
+    await db.refresh(item)
+    await recalculate_total(item.order_id, db)
+    await db.refresh(item)
     return item
 
 
 @router.delete("/order-items/{item_id}", status_code=204)
-def delete_order_item(
+async def delete_order_item(
     item_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    item = db.query(OrderItem).filter(OrderItem.id == item_id).first()
+    result = await db.execute(select(OrderItem).where(OrderItem.id == item_id))
+    item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Order item not found")
 
-    variant = db.query(ProductVariant).filter(ProductVariant.id == item.product_variant_id).first()
-    if variant:
-        variant.stock_quantity += item.quantity
+    if item.product_variant_id is not None:
+        result = await db.execute(select(ProductVariant).where(ProductVariant.id == item.product_variant_id))
+        variant = result.scalar_one_or_none()
+        if variant:
+            variant.stock_quantity += item.quantity
 
     order_id = item.order_id
-    db.delete(item)
-    db.commit()
+    await db.delete(item)
+    await db.commit()
 
-    order = db.query(Order).filter(Order.id == order_id).first()
-    recalculate_total(order, db)
+    await recalculate_total(order_id, db)
     return None

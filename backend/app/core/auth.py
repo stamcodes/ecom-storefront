@@ -1,41 +1,31 @@
-from fastapi import Depends, HTTPException, status, Request
+﻿from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.security.utils import get_authorization_scheme_param
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database.session import get_db
 from app.models.user import User
 from app.core.jwt import verify_access_token
 
-# HTTP Bearer Authentication
+# HTTP ******
 security = HTTPBearer()
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
-):
-    # Extract the JWT from the Authorization header
-    token = credentials.credentials
-
-    # Verify and decode the JWT
+async def _get_current_user_by_token(token: str, db: AsyncSession) -> User:
     payload = verify_access_token(token)
 
-    # Extract the user ID from the "sub" claim
     user_id = payload.get("sub")
-
     if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"
         )
 
-    # Fetch the user from the database
-    user = (
-        db.query(User)
-        .filter(User.id == int(user_id))
-        .first()
-    )
+    stmt = select(User).options(selectinload(User.role)).where(User.id == int(user_id))
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
 
     if user is None:
         raise HTTPException(
@@ -51,6 +41,14 @@ def get_current_user(
 
     return user
 
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    return await _get_current_user_by_token(credentials.credentials, db)
+
+
 async def get_current_user_optional(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -64,6 +62,6 @@ async def get_current_user_optional(
         return None
 
     try:
-        return await get_current_user(token=token, db=db)
+        return await _get_current_user_by_token(token, db)
     except HTTPException:
         return None
