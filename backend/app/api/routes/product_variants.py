@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+﻿from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from app.database.session import get_db
@@ -13,26 +14,29 @@ router = APIRouter()
 
 
 @router.get("/products/{product_id}/variants", response_model=list[ProductVariantOut])
-def get_product_variants(
+async def get_product_variants(
     product_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    product = db.query(Product).filter(Product.id == product_id).first()
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    return db.query(ProductVariant).filter(ProductVariant.product_id == product_id).all()
+    result = await db.execute(select(ProductVariant).where(ProductVariant.product_id == product_id))
+    return result.scalars().all()
 
 
 @router.post("/products/{product_id}/variants", response_model=ProductVariantOut, status_code=201)
-def create_product_variant(
+async def create_product_variant(
     product_id: int,
     payload: ProductVariantCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    product = db.query(Product).filter(Product.id == product_id).first()
+    result = await db.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
@@ -46,35 +50,37 @@ def create_product_variant(
     db.add(new_variant)
 
     try:
-        db.commit()
+        await db.commit()
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=400, detail="SKU already exists")
 
-    db.refresh(new_variant)
+    await db.refresh(new_variant)
     return new_variant
 
 
 @router.get("/variants/{variant_id}", response_model=ProductVariantOut)
-def get_variant(
+async def get_variant(
     variant_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
+    result = await db.execute(select(ProductVariant).where(ProductVariant.id == variant_id))
+    variant = result.scalar_one_or_none()
     if not variant:
         raise HTTPException(status_code=404, detail="Variant not found")
     return variant
 
 
 @router.put("/variants/{variant_id}", response_model=ProductVariantOut)
-def update_variant(
+async def update_variant(
     variant_id: int,
     payload: ProductVariantUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
+    result = await db.execute(select(ProductVariant).where(ProductVariant.id == variant_id))
+    variant = result.scalar_one_or_none()
     if not variant:
         raise HTTPException(status_code=404, detail="Variant not found")
 
@@ -83,30 +89,31 @@ def update_variant(
         setattr(variant, field, value)
 
     try:
-        db.commit()
+        await db.commit()
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(status_code=400, detail="SKU already exists")
 
-    db.refresh(variant)
+    await db.refresh(variant)
     return variant
 
 
 @router.delete("/variants/{variant_id}", status_code=204)
-def delete_variant(
+async def delete_variant(
     variant_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    variant = db.query(ProductVariant).filter(ProductVariant.id == variant_id).first()
+    result = await db.execute(select(ProductVariant).where(ProductVariant.id == variant_id))
+    variant = result.scalar_one_or_none()
     if not variant:
         raise HTTPException(status_code=404, detail="Variant not found")
 
     try:
-        db.delete(variant)
-        db.commit()
+        await db.delete(variant)
+        await db.commit()
     except IntegrityError:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=400,
             detail="This variant cannot be deleted because it has existing orders. Deactivate it instead.",
