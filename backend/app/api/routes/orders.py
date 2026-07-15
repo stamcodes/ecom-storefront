@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
-from app.models.branch import Branch
 from app.models.user import User
 from app.models.order import Order
 from app.schemas.order import OrderOut, OrderCreate, OrderUpdate, OrderStatusUpdate
@@ -37,16 +36,11 @@ def create_order(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    branch = db.query(Branch).filter(Branch.id == payload.branch_id).first()
-    if not branch:
-        raise HTTPException(status_code=404, detail="Branch not found")
-
     user = db.query(User).filter(User.id == payload.created_by_user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     new_order = Order(
-        branch_id=payload.branch_id,
         created_by_user_id=payload.created_by_user_id,
         customer_name=payload.customer_name,
         status=payload.status,
