@@ -25,6 +25,7 @@ class CartOut(BaseModel):
     id: int
     customer_id: int | None
     guest_token: str | None
+    coupon_id: int | None
     items: list[CartItemOut]
     total: float
 

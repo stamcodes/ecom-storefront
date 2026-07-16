@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from app.database.session import get_db
+from app.models.user import User
 from app.models.order import Order
 from app.models.product_variant import ProductVariant
 from app.models.order_item import OrderItem
@@ -11,6 +12,17 @@ from app.schemas.order_item import OrderItemOut, OrderItemCreate, OrderItemUpdat
 from app.core.permissions import require_role, ADMIN, MANAGER, STAFF
 
 router = APIRouter()
+
+# #TODO: final check if completed is the exact status indicator.
+LOCKED_STATUS = "completed"
+
+
+def _assert_order_editable(order: Order) -> None:
+    if order.status == LOCKED_STATUS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Order is '{LOCKED_STATUS}' and can no longer be modified",
+        )
 
 
 async def recalculate_total(order_id: int, db: AsyncSession) -> None:
@@ -52,6 +64,8 @@ async def add_order_item(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    _assert_order_editable(order)
 
     result = await db.execute(select(ProductVariant).where(ProductVariant.id == payload.product_variant_id))
     variant = result.scalar_one_or_none()
@@ -97,6 +111,13 @@ async def update_order_item(
     if not item:
         raise HTTPException(status_code=404, detail="Order item not found")
 
+    result = await db.execute(select(Order).where(Order.id == item.order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    _assert_order_editable(order)
+
     update_data = payload.model_dump(exclude_unset=True)
 
     if "quantity" in update_data:
@@ -137,6 +158,13 @@ async def delete_order_item(
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Order item not found")
+
+    result = await db.execute(select(Order).where(Order.id == item.order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    _assert_order_editable(order)
 
     if item.product_variant_id is not None:
         result = await db.execute(select(ProductVariant).where(ProductVariant.id == item.product_variant_id))

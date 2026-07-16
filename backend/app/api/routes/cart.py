@@ -1,4 +1,6 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, Header
+﻿from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -7,6 +9,7 @@ from app.database.session import get_db
 from app.models.cart import Cart
 from app.models.cart_item import CartItem
 from app.models.product_variant import ProductVariant
+from app.models.coupon import Coupon
 from app.models.user import User
 from app.schemas.cart import (
     CartItemCreate,
@@ -240,14 +243,31 @@ async def apply_coupon(
     current_user: User | None = Depends(get_current_user_optional),
     x_guest_token: str | None = Header(default=None),
 ):
-    from app.models.coupon import Coupon
-
     result = await db.execute(select(Coupon).where(Coupon.code == payload.code))
     coupon = result.scalar_one_or_none()
     if not coupon:
         raise HTTPException(status_code=404, detail="Coupon not found")
 
+    if not coupon.is_active:
+        raise HTTPException(status_code=400, detail="Coupon is not active")
+
+    now = datetime.now(timezone.utc)
+    if now < coupon.start_date or now > coupon.end_date:
+        raise HTTPException(status_code=400, detail="Coupon is not valid at this time")
+
+    if coupon.usage_limit is not None and coupon.usage_count >= coupon.usage_limit:
+        raise HTTPException(status_code=400, detail="Coupon usage limit reached")
+
     cart = await _get_or_create_cart(db, current_user, x_guest_token)
+
+    cart_total = _compute_total(cart)
+    min_order = coupon.minimum_order_amount or 0
+    if cart_total < float(min_order):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Order must be at least {min_order} to use this coupon",
+        )
+
     cart.coupon_id = coupon.id
     await db.commit()
     cart = await _reload_cart(db, cart.id)

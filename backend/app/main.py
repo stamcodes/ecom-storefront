@@ -18,17 +18,17 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.cart import router as cart_router
 
 app = FastAPI()
-app.include_router(users_router)
-app.include_router(roles_router)
-app.include_router(permissions_router)
-app.include_router(role_permissions_router)
-app.include_router(categories_router)
-app.include_router(products_router)
-app.include_router(product_categories_router)
-app.include_router(product_variants_router)
-app.include_router(orders_router)
-app.include_router(order_items_router)
-app.include_router(auth_router)
+app.include_router(users_router, tags=["Users"])
+app.include_router(roles_router, tags=["Roles"])
+app.include_router(permissions_router, tags=["Permissions"])
+app.include_router(role_permissions_router, tags=["Role Permissions"])
+app.include_router(categories_router, tags=["Categories"])
+app.include_router(products_router, tags=["Products"])
+app.include_router(product_categories_router, tags=["Product Categories"])
+app.include_router(product_variants_router, tags=["Product Variants"])
+app.include_router(orders_router, tags=["Orders-Admin"])
+app.include_router(order_items_router, tags=["Order Items"])
+app.include_router(auth_router, tags=["Auth"])
 app.include_router(cart_router, tags=["Cart"])
 
 
