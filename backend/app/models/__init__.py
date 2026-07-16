@@ -4,8 +4,13 @@ from .permission import Permission
 from .role_permission import RolePermission
 from .product import Product
 from .product_category import ProductCategory
-from .category import Category  
+from .category import Category
 from .product_variant import ProductVariant
+from .order import Order
+from .order_item import OrderItem
+from .cart import Cart
+from .cart_item import CartItem
+from .coupon import Coupon
 from .order import Order
 from .order_item import OrderItem
 from .cart import Cart

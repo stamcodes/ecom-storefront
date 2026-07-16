@@ -68,9 +68,6 @@ class User(Base):
         onupdate=func.now()
     )
 
-    # Relationships
+   
+   # Relationships
     role = relationship("Role", back_populates="users")
-    branch_links: Mapped[list["UserBranch"]] = relationship(
-        back_populates="user",
-        cascade="all, delete-orphan"
-    )
