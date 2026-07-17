@@ -1,73 +1,40 @@
-from sqlalchemy import (
-    Boolean,
-    DateTime,
-    ForeignKey,
-    Integer,
-    String,
-    func
-)
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database.base import Base
 
 
 class User(Base):
     __tablename__ = "users"
 
-    # Primary Key
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-
-    # Basic Fields
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    password: Mapped[str] = mapped_column(String(255), nullable=False)
+    role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    phone_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
-    email: Mapped[str] = mapped_column(
-        String(255),
-        unique=True,
-        nullable=False
+    password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_reset_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
-    password: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email_verification_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
-    # --- NEW STOREFRONT FIELDS ---
-    phone_number: Mapped[str | None] = mapped_column(
-        String(20),
-        nullable=True,
-        default=None
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    avatar_url: Mapped[str | None] = mapped_column(
-        String(512),
-        nullable=True,
-        default=None
+    role: Mapped["Role"] = relationship(back_populates="users")
+    customer_profile: Mapped["CustomerProfile"] = relationship(
+        back_populates="user", uselist=False
     )
-    # -----------------------------
-
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        default=True,
-        nullable=False
-    )
-
-    # Foreign Key
-    role_id: Mapped[int] = mapped_column(
-        ForeignKey("roles.id"),
-        nullable=False
-    )
-
-    # Timestamps
-    created_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now()
-    )
-
-    updated_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now()
-    )
-
-   
-   # Relationships
-    role = relationship("Role", back_populates="users")

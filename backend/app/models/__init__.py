@@ -11,7 +11,5 @@ from .order_item import OrderItem
 from .cart import Cart
 from .cart_item import CartItem
 from .coupon import Coupon
-from .order import Order
-from .order_item import OrderItem
-from .cart import Cart
-from .cart_item import CartItem
+from .customer_profile import CustomerProfile
+from .address import Address  
