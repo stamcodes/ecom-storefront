@@ -12,4 +12,5 @@ from .cart import Cart
 from .cart_item import CartItem
 from .coupon import Coupon
 from .customer_profile import CustomerProfile
-from .address import Address  
+from .address import Address
+from .review import Review
