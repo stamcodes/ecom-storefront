@@ -21,6 +21,7 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.customer import router as customer_router
 from app.api.routes.cart import router as cart_router
 from app.api.routes.reviews import router as reviews_router
+from app.api.routes.checkout import router as checkout_router
 
 app = FastAPI()
 app.include_router(users_router, tags=["Users"])
@@ -37,6 +38,7 @@ app.include_router(auth_router, tags=["Auth-Customer"])
 app.include_router(customer_router, tags=["Auth-Customer"])
 app.include_router(cart_router, tags=["Cart"])
 app.include_router(reviews_router, tags=["Reviews"])
+app.include_router(checkout_router, tags=["Checkout"])
 
 
 @app.on_event("startup")
