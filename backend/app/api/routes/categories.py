@@ -47,7 +47,6 @@ async def create_category(
     new_category = Category(
         name=payload.name,
         description=payload.description,
-        branch_id=None,
     )
     db.add(new_category)
     await db.commit()

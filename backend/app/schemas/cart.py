@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+import uuid
 
 
 class CartItemCreate(BaseModel):
@@ -14,7 +15,7 @@ class CartItemOut(BaseModel):
     id: int
     product_variant_id: int
     quantity: int
-    unit_price_snapshot: float
+    unit_price: float
     subtotal: float
 
     class Config:
@@ -24,7 +25,7 @@ class CartItemOut(BaseModel):
 class CartOut(BaseModel):
     id: int
     customer_id: int | None
-    guest_token: str | None
+    guest_token: uuid.UUID | None
     coupon_id: int | None
     items: list[CartItemOut]
     total: float

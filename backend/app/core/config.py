@@ -10,6 +10,15 @@ class Settings(BaseSettings):
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    SMTP_HOST: str = "sandbox.smtp.mailtrap.io"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = "PLACEHOLDER_USERNAME"
+    SMTP_PASSWORD: str = "PLACEHOLDER_PASSWORD"
+    FROM_EMAIL: str = "no-reply@yourapp.com"
+    FRONTEND_URL: str = "https://yourapp.com"
+
+    TEST_MODE: bool = False
+
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True

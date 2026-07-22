@@ -11,6 +11,7 @@ from app.models.cart_item import CartItem
 from app.models.product_variant import ProductVariant
 from app.models.coupon import Coupon
 from app.models.user import User
+from app.models.customer_profile import CustomerProfile
 from app.schemas.cart import (
     CartItemCreate,
     CartItemUpdate,
@@ -22,9 +23,11 @@ from app.core.auth import get_current_user_optional
 
 router = APIRouter()
 
+_CART_ITEM_LOAD = selectinload(Cart.items).selectinload(CartItem.product_variant)
+
 
 def _compute_total(cart: Cart) -> float:
-    return sum(item.unit_price_snapshot * item.quantity for item in cart.items)
+    return sum(float(item.product_variant.price) * item.quantity for item in cart.items)
 
 
 def _serialize_cart(cart: Cart) -> dict:
@@ -38,13 +41,24 @@ def _serialize_cart(cart: Cart) -> dict:
                 "id": item.id,
                 "product_variant_id": item.product_variant_id,
                 "quantity": item.quantity,
-                "unit_price_snapshot": item.unit_price_snapshot,
-                "subtotal": item.unit_price_snapshot * item.quantity,
+                "unit_price": float(item.product_variant.price),
+                "subtotal": float(item.product_variant.price) * item.quantity,
             }
             for item in cart.items
         ],
         "total": _compute_total(cart),
     }
+
+
+async def _get_or_create_customer_profile(db: AsyncSession, user: User) -> CustomerProfile:
+    result = await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        profile = CustomerProfile(user_id=user.id)
+        db.add(profile)
+        await db.commit()
+        await db.refresh(profile)
+    return profile
 
 
 async def _get_or_create_cart(
@@ -53,12 +67,14 @@ async def _get_or_create_cart(
     guest_token: str | None,
 ) -> Cart:
     if current_user:
+        profile = await _get_or_create_customer_profile(db, current_user)
+
         result = await db.execute(
-            select(Cart).options(selectinload(Cart.items)).where(Cart.customer_id == current_user.id)
+            select(Cart).options(_CART_ITEM_LOAD).where(Cart.customer_id == profile.id)
         )
         cart = result.scalar_one_or_none()
         if not cart:
-            cart = Cart(customer_id=current_user.id)
+            cart = Cart(customer_id=profile.id)
             db.add(cart)
             await db.commit()
             await db.refresh(cart)
@@ -68,7 +84,7 @@ async def _get_or_create_cart(
         raise HTTPException(status_code=400, detail="Guest token required for guest cart")
 
     result = await db.execute(
-        select(Cart).options(selectinload(Cart.items)).where(Cart.guest_token == guest_token)
+        select(Cart).options(_CART_ITEM_LOAD).where(Cart.guest_token == guest_token)
     )
     cart = result.scalar_one_or_none()
     if not cart:
@@ -81,7 +97,7 @@ async def _get_or_create_cart(
 
 async def _reload_cart(db: AsyncSession, cart_id: int) -> Cart:
     result = await db.execute(
-        select(Cart).options(selectinload(Cart.items)).where(Cart.id == cart_id)
+        select(Cart).options(_CART_ITEM_LOAD).where(Cart.id == cart_id)
     )
     return result.scalar_one()
 
@@ -127,7 +143,6 @@ async def add_cart_item(
             cart_id=cart.id,
             product_variant_id=payload.product_variant_id,
             quantity=payload.quantity,
-            unit_price_snapshot=variant.price,
         )
         db.add(new_item)
 
@@ -197,18 +212,21 @@ async def merge_cart(
     if not current_user:
         raise HTTPException(status_code=401, detail="Login required to merge cart")
 
+    profile = await _get_or_create_customer_profile(db, current_user)
+
     result = await db.execute(select(Cart).where(Cart.guest_token == payload.guest_token))
     guest_cart = result.scalar_one_or_none()
     if not guest_cart:
         raise HTTPException(status_code=404, detail="Guest cart not found")
 
-    result = await db.execute(select(Cart).where(Cart.customer_id == current_user.id))
+    result = await db.execute(select(Cart).where(Cart.customer_id == profile.id))
     user_cart = result.scalar_one_or_none()
     if not user_cart:
-        guest_cart.customer_id = current_user.id
+        guest_cart.customer_id = profile.id
         guest_cart.guest_token = None
         await db.commit()
-        return _serialize_cart(guest_cart)
+        cart = await _reload_cart(db, guest_cart.id)
+        return _serialize_cart(cart)
 
     result = await db.execute(select(CartItem).where(CartItem.cart_id == guest_cart.id))
     guest_items = result.scalars().all()
@@ -227,7 +245,6 @@ async def merge_cart(
                 cart_id=user_cart.id,
                 product_variant_id=guest_item.product_variant_id,
                 quantity=guest_item.quantity,
-                unit_price_snapshot=guest_item.unit_price_snapshot,
             ))
 
     await db.delete(guest_cart)

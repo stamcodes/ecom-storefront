@@ -6,8 +6,8 @@ from app.schemas.order_item import OrderItemOut
 
 class OrderOut(BaseModel):
     id: int
-    branch_id: int
-    created_by_user_id: int
+    customer_id: int
+    created_by_user_id: int | None = None
     total_amount: float
     status: str
     customer_name: str | None = None
@@ -18,8 +18,8 @@ class OrderOut(BaseModel):
 
 
 class OrderCreate(BaseModel):
-    branch_id: int
-    created_by_user_id: int
+    customer_id: int
+    created_by_user_id: int | None = None
     customer_name: str | None = Field(default=None, max_length=100)
     status: str = Field(default="open", max_length=20)
 

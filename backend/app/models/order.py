@@ -11,8 +11,8 @@ class Order(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
 
-    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id", ondelete="RESTRICT"), nullable=False)
-    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customer_profiles.id", ondelete="RESTRICT"), nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     total_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
@@ -28,3 +28,4 @@ class Order(Base):
         back_populates="order",
         cascade="all, delete-orphan"
     )
+    customer: Mapped["CustomerProfile"] = relationship()

@@ -28,3 +28,4 @@ class Cart(Base):
     # Relationships
     items: Mapped[list["CartItem"]] = relationship(back_populates="cart", cascade="all, delete-orphan")
     coupon: Mapped["Coupon"] = relationship(back_populates="carts")
+    customer: Mapped["CustomerProfile"] = relationship(back_populates="cart")
