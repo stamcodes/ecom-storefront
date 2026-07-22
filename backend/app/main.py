@@ -22,6 +22,7 @@ from app.api.routes.customer import router as customer_router
 from app.api.routes.cart import router as cart_router
 from app.api.routes.reviews import router as reviews_router
 from app.api.routes.checkout import router as checkout_router
+from app.api.routes.payments import router as payments_router
 
 app = FastAPI()
 app.include_router(users_router, tags=["Users"])

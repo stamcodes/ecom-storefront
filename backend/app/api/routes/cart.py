@@ -77,7 +77,7 @@ async def _get_or_create_cart(
             cart = Cart(customer_id=profile.id)
             db.add(cart)
             await db.commit()
-            await db.refresh(cart)
+            cart = await _reload_cart(db, cart.id)
         return cart
 
     if not guest_token:
@@ -91,7 +91,7 @@ async def _get_or_create_cart(
         cart = Cart(guest_token=guest_token)
         db.add(cart)
         await db.commit()
-        await db.refresh(cart)
+        cart = await _reload_cart(db, cart.id)
     return cart
 
 

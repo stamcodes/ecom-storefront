@@ -1,6 +1,5 @@
-﻿from fastapi import Depends, HTTPException, status, Request
+﻿from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.security.utils import get_authorization_scheme_param
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -9,8 +8,13 @@ from app.database.session import get_db
 from app.models.user import User
 from app.core.jwt import verify_access_token
 
-# HTTP ******
+# HTTP Bearer for strictly-authenticated routes
 security = HTTPBearer()
+
+# HTTP Bearer for optional-auth routes (guest-or-user) — does NOT auto-error
+# when missing, but DOES register the security requirement so Swagger/OpenAPI
+# attaches the Authorize token to requests on these routes.
+security_optional = HTTPBearer(auto_error=False)
 
 
 async def _get_current_user_by_token(token: str, db: AsyncSession) -> User:
@@ -50,18 +54,18 @@ async def get_current_user(
 
 
 async def get_current_user_optional(
-    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
-    authorization = request.headers.get("Authorization")
-    if not authorization:
-        return None
-
-    scheme, token = get_authorization_scheme_param(authorization)
-    if scheme.lower() != "bearer" or not token:
+    """
+    Returns the authenticated User if a valid Bearer token is present.
+    Returns None if no token is present, or if the token is invalid/expired
+    (silently — callers fall back to guest-token logic in that case).
+    """
+    if not credentials:
         return None
 
     try:
-        return await _get_current_user_by_token(token, db)
+        return await _get_current_user_by_token(credentials.credentials, db)
     except HTTPException:
         return None
