@@ -63,7 +63,7 @@ async def cancel_order(
 
     order.order_status = "cancelled"
     await db.commit()
-    await db.refresh(order)
+    order = await _get_own_order(db, order_id, profile)
     return order
 
 
@@ -103,7 +103,7 @@ async def reorder(
             ))
 
     await db.commit()
-    await db.refresh(old_order)
+    old_order = await _get_own_order(db, order_id, profile)
     return old_order
 
 

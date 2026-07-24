@@ -39,6 +39,7 @@ from app.models.order_item import OrderItem
 import app.models  # noqa: F401  registers all model metadata
 from app.main import app as fastapi_app
 
+STAFF_ROLE_ID = 3
 CUSTOMER_ROLE_ID = 4
 
 test_engine = create_async_engine(settings.DATABASE_URL, future=True, poolclass=NullPool)
@@ -56,9 +57,13 @@ async def setup_database():
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with TestSessionLocal() as session:
-        result = await session.execute(select(Role).where(Role.id == CUSTOMER_ROLE_ID))
-        if not result.scalar_one_or_none():
+        result = await session.execute(select(Role).where(Role.id.in_([STAFF_ROLE_ID, CUSTOMER_ROLE_ID])))
+        existing_role_ids = {role.id for role in result.scalars()}
+        if STAFF_ROLE_ID not in existing_role_ids:
+            session.add(Role(id=STAFF_ROLE_ID, name="staff", description="Staff role"))
+        if CUSTOMER_ROLE_ID not in existing_role_ids:
             session.add(Role(id=CUSTOMER_ROLE_ID, name="customer", description="Customer role"))
+        if STAFF_ROLE_ID not in existing_role_ids or CUSTOMER_ROLE_ID not in existing_role_ids:
             await session.commit()
     yield
     async with test_engine.begin() as conn:
@@ -221,3 +226,22 @@ async def make_order_item(db, make_product_variant):
         return order_item, variant.product_id
 
     return _make_order_item
+
+
+@pytest_asyncio.fixture
+async def make_staff(db):
+    async def _make_staff(email="staff@example.com", password="Password123!"):
+        user = User(
+            name="Test Staff",
+            email=email,
+            password=hash_password(password),
+            role_id=STAFF_ROLE_ID,
+            is_active=True,
+            email_verified=True,
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        return user, password
+
+    return _make_staff

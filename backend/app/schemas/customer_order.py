@@ -7,7 +7,7 @@ from app.schemas.order_item import OrderItemOut
 class CustomerOrderOut(BaseModel):
     id: int
     customer_name: str | None = None
-    status: str
+    order_status: str
     total_amount: float
     created_at: datetime
     items: list[OrderItemOut] = []
