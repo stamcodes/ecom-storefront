@@ -57,6 +57,8 @@ backend/.venv/
 backend/.env
 backend/.env.production
 backend/.env.development
+backend/.env.test
+backend/repomix-output.md
 
 # ---------- Editors / OS ----------
 .vscode/

@@ -20,6 +20,10 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select, event
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
+from app.models.product import Product
+from app.models.product_variant import ProductVariant
+from app.models.cart import Cart
+from app.models.cart_item import CartItem
 
 from app.database.base import Base
 from app.database.session import get_db
@@ -142,3 +146,53 @@ def mock_emails(monkeypatch):
     monkeypatch.setattr("app.api.routes.customer_auth.send_password_reset_email", fake_reset)
 
     return sent
+
+
+@pytest_asyncio.fixture
+async def make_product_variant(db):
+    counter = {"n": 0}
+
+    async def _make_product_variant(price=19.99, stock_quantity=10, is_active=True):
+        counter["n"] += 1
+        n = counter["n"]
+
+        product = Product(
+            name=f"Test Product {n}",
+            description="Seeded for checkout tests",
+            price=price,
+            is_active=True,
+        )
+        db.add(product)
+        await db.flush()
+
+        variant = ProductVariant(
+            product_id=product.id,
+            sku=f"TEST-SKU-{n}",
+            price=price,
+            stock_quantity=stock_quantity,
+            is_active=is_active,
+        )
+        db.add(variant)
+        await db.commit()
+        await db.refresh(variant)
+
+        return variant
+
+    return _make_product_variant
+
+
+@pytest_asyncio.fixture
+async def make_cart_with_item(db):
+    async def _make_cart_with_item(customer_profile_id, variant, quantity=1):
+        cart = Cart(customer_id=customer_profile_id)
+        db.add(cart)
+        await db.flush()
+
+        item = CartItem(cart_id=cart.id, product_variant_id=variant.id, quantity=quantity)
+        db.add(item)
+        await db.commit()
+        await db.refresh(cart)
+
+        return cart
+
+    return _make_cart_with_item
