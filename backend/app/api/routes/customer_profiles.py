@@ -5,11 +5,11 @@ from sqlalchemy import select
 from app.database.session import get_db
 from app.models.user import User
 from app.models.address import Address
-from app.schemas.customer import CustomerProfileOut, CustomerProfileUpdate
+from backend.app.schemas.customer_profile import CustomerProfileOut, CustomerProfileUpdate
 from app.schemas.address import AddressCreate, AddressUpdate, AddressOut
 from app.core.auth import get_current_user
 
-router = APIRouter(prefix="/customer", tags=["customer"])
+router = APIRouter()
 
 
 @router.get("/me", response_model=CustomerProfileOut)

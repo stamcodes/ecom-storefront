@@ -16,30 +16,37 @@ from app.api.routes.product_variants import router as product_variants_router
 from app.api.routes.orders import router as orders_router
 from app.api.routes.order_items import router as order_items_router
 from app.api.routes.auth import router as auth_router
-from app.api.routes.cart import router as cart_router
-from app.api.routes.auth import router as auth_router
-from app.api.routes.customer import router as customer_router
+from backend.app.api.routes.customer_profiles import router as customer_router
 from app.api.routes.cart import router as cart_router
 from app.api.routes.reviews import router as reviews_router
-from app.api.routes.checkout import router as checkout_router
 from app.api.routes.payments import router as payments_router
+from app.api.routes.customer_auth import router as customer_auth_router
+from app.api.routes.checkout import router as checkout_router
 
 app = FastAPI()
-app.include_router(users_router, tags=["Users"])
-app.include_router(roles_router, tags=["Roles"])
-app.include_router(permissions_router, tags=["Permissions"])
-app.include_router(role_permissions_router, tags=["Role Permissions"])
-app.include_router(categories_router, tags=["Categories"])
-app.include_router(products_router, tags=["Products"])
-app.include_router(product_categories_router, tags=["Product Categories"])
-app.include_router(product_variants_router, tags=["Product Variants"])
-app.include_router(orders_router, tags=["Orders-Admin"])
-app.include_router(order_items_router, tags=["Order Items"])
-app.include_router(auth_router, tags=["Auth-Customer"])
-app.include_router(customer_router, tags=["Auth-Customer"])
-app.include_router(cart_router, tags=["Cart"])
-app.include_router(reviews_router, tags=["Reviews"])
-app.include_router(checkout_router, tags=["Checkout"])
+
+ROUTERS = [
+    (users_router, "Users"),
+    (auth_router, "Auth-Admin"),
+    (roles_router, "Roles"),
+    (permissions_router, "Permissions"),
+    (role_permissions_router, "Role Permissions"),
+    (categories_router, "Categories"),
+    (products_router, "Products"),
+    (product_categories_router, "Product Categories"),
+    (product_variants_router, "Product Variants"),
+    (orders_router, "Orders-Admin"),
+    (order_items_router, "Order Items"),
+    (customer_auth_router, "Customer Auth"),
+    (customer_router, "Customer Profile"),
+    (cart_router, "Cart"),
+    (reviews_router, "Reviews"),
+    (payments_router, "Payments"),
+    (checkout_router, "Checkout"),
+]
+
+for router, tag in ROUTERS:
+    app.include_router(router, tags=[tag])
 
 
 @app.on_event("startup")
