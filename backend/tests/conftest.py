@@ -17,7 +17,7 @@ if sys.platform == "win32":
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy import select, event
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import NullPool
 from app.models.product import Product
@@ -33,6 +33,8 @@ from app.core.security import hash_password
 from app.models.user import User
 from app.models.role import Role
 from app.models.customer_profile import CustomerProfile
+from app.models.order import Order
+from app.models.order_item import OrderItem
 
 import app.models  # noqa: F401  registers all model metadata
 from app.main import app as fastapi_app
@@ -66,25 +68,18 @@ async def setup_database():
 
 @pytest_asyncio.fixture
 async def db():
-    connection = await test_engine.connect()
-    outer_transaction = await connection.begin()
-    session = AsyncSession(bind=connection, expire_on_commit=False)
-
-    await connection.begin_nested()
-
-    def restart_savepoint(sess, transaction):
-        if transaction.nested and not transaction._parent.nested:
-            connection.sync_connection.begin_nested()
-
-    event.listen(session.sync_session, "after_transaction_end", restart_savepoint)
-
-    try:
-        yield session
-    finally:
-        event.remove(session.sync_session, "after_transaction_end", restart_savepoint)
-        await session.close()
-        await outer_transaction.rollback()
-        await connection.close()
+    async with test_engine.connect() as connection:
+        await connection.begin()
+        session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
+        try:
+            yield session
+        finally:
+            await session.close()
+            await connection.rollback()
 
 
 @pytest_asyncio.fixture
@@ -196,3 +191,33 @@ async def make_cart_with_item(db):
         return cart
 
     return _make_cart_with_item
+
+
+@pytest_asyncio.fixture
+async def make_order_item(db, make_product_variant):
+    async def _make_order_item(customer_profile_id, variant=None, quantity=1):
+        if variant is None:
+            variant = await make_product_variant()
+
+        order = Order(
+            customer_id=customer_profile_id,
+            customer_name="Test Customer",
+            status="completed",
+            total_amount=float(variant.price) * quantity,
+        )
+        db.add(order)
+        await db.flush()
+
+        order_item = OrderItem(
+            order_id=order.id,
+            product_variant_id=variant.id,
+            quantity=quantity,
+            price_at_purchase=float(variant.price),
+        )
+        db.add(order_item)
+        await db.commit()
+        await db.refresh(order_item)
+
+        return order_item, variant.product_id
+
+    return _make_order_item

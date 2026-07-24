@@ -87,14 +87,16 @@ async def create_payment_intent(
 
     return {"client_secret": intent.client_secret}
 
-
 async def _create_order_from_cart(db: AsyncSession, cart_id: int, customer_id: int) -> None:
     result = await db.execute(
-        select(Cart).options(_CART_ITEM_LOAD).where(Cart.id == cart_id, Cart.customer_id == customer_id)
+        select(Cart)
+        .options(_CART_ITEM_LOAD)
+        .where(Cart.id == cart_id, Cart.customer_id == customer_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     cart = result.scalar_one_or_none()
     if not cart or not cart.items:
-        # Cart already processed or emptied — avoid duplicate order creation on webhook retries
         return
 
     result = await db.execute(select(CustomerProfile).where(CustomerProfile.id == customer_id))
@@ -131,7 +133,8 @@ async def _create_order_from_cart(db: AsyncSession, cart_id: int, customer_id: i
 
     new_order.total_amount = total
 
-    for item in cart.items:
+    for item in list(cart.items):
+        cart.items.remove(item)
         await db.delete(item)
 
     await db.commit()
