@@ -18,12 +18,11 @@ LOCKED_STATUS = "completed"
 
 
 def _assert_order_editable(order: Order) -> None:
-    if order.status == LOCKED_STATUS:
+    if order.order_status == LOCKED_STATUS:
         raise HTTPException(
             status_code=400,
             detail=f"Order is '{LOCKED_STATUS}' and can no longer be modified",
         )
-
 
 async def recalculate_total(order_id: int, db: AsyncSession) -> None:
     result = await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))

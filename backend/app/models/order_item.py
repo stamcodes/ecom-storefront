@@ -16,6 +16,8 @@ class OrderItem(Base):
 
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price_at_purchase: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    discount_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
 
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),

@@ -16,3 +16,4 @@ from .address import Address
 from .review import Review
 from .wishlist import Wishlist
 from app.models.payment import Payment
+from .return_request import ReturnRequest

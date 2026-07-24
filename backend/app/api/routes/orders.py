@@ -39,15 +39,12 @@ async def create_order(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(ADMIN, MANAGER, STAFF))
 ):
-    result = await db.execute(select(User).where(User.id == payload.created_by_user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     new_order = Order(
-        created_by_user_id=payload.created_by_user_id,
-        customer_name=payload.customer_name,
-        status=payload.status,
+        customer_id=payload.customer_id,
+        guest_name=payload.guest_name,
+        guest_email=payload.guest_email,
+        guest_phone=payload.guest_phone,
+        order_status=payload.order_status,
         total_amount=0,
     )
     db.add(new_order)
@@ -89,7 +86,7 @@ async def update_order_status(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    order.status = payload.status
+    order.order_status = payload.status
     await db.commit()
     await db.refresh(order)
     return order
