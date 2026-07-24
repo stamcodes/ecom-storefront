@@ -17,7 +17,7 @@ from app.core.auth import get_current_user
 from app.core.email import send_password_reset_email
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter()
 
 RESET_TOKEN_EXPIRE_HOURS = 1
 

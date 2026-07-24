@@ -8,12 +8,7 @@ from app.database.session import get_db
 from app.models.user import User
 from app.core.jwt import verify_access_token
 
-# HTTP Bearer for strictly-authenticated routes
 security = HTTPBearer()
-
-# HTTP Bearer for optional-auth routes (guest-or-user) — does NOT auto-error
-# when missing, but DOES register the security requirement so Swagger/OpenAPI
-# attaches the Authorize token to requests on these routes.
 security_optional = HTTPBearer(auto_error=False)
 
 
@@ -27,7 +22,11 @@ async def _get_current_user_by_token(token: str, db: AsyncSession) -> User:
             detail="Invalid token"
         )
 
-    stmt = select(User).options(selectinload(User.role)).where(User.id == int(user_id))
+    stmt = (
+        select(User)
+        .options(selectinload(User.role), selectinload(User.customer_profile))
+        .where(User.id == int(user_id))
+    )
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
@@ -57,11 +56,6 @@ async def get_current_user_optional(
     credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
-    """
-    Returns the authenticated User if a valid Bearer token is present.
-    Returns None if no token is present, or if the token is invalid/expired
-    (silently — callers fall back to guest-token logic in that case).
-    """
     if not credentials:
         return None
 
