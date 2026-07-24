@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.database.session import get_db
 from app.models.user import User
 from app.models.address import Address
-from backend.app.schemas.customer_profile import CustomerProfileOut, CustomerProfileUpdate
+from app.schemas.customer_profile import CustomerProfileOut, CustomerProfileUpdate
 from app.schemas.address import AddressCreate, AddressUpdate, AddressOut
 from app.core.auth import get_current_user
 

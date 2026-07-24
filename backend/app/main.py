@@ -16,7 +16,7 @@ from app.api.routes.product_variants import router as product_variants_router
 from app.api.routes.orders import router as orders_router
 from app.api.routes.order_items import router as order_items_router
 from app.api.routes.auth import router as auth_router
-from backend.app.api.routes.customer_profiles import router as customer_router
+from app.api.routes.customer_profiles import router as customer_router
 from app.api.routes.cart import router as cart_router
 from app.api.routes.reviews import router as reviews_router
 from app.api.routes.payments import router as payments_router
@@ -31,8 +31,8 @@ ROUTERS = [
     (roles_router, "Roles"),
     (permissions_router, "Permissions"),
     (role_permissions_router, "Role Permissions"),
-    (categories_router, "Categories"),
     (products_router, "Products"),
+    (categories_router, "Categories"),
     (product_categories_router, "Product Categories"),
     (product_variants_router, "Product Variants"),
     (orders_router, "Orders-Admin"),
