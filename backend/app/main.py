@@ -22,6 +22,7 @@ from app.api.routes.reviews import router as reviews_router
 from app.api.routes.payments import router as payments_router
 from app.api.routes.customer_auth import router as customer_auth_router
 from app.api.routes.checkout import router as checkout_router
+from app.api.routes.wishlist import router as wishlist_router
 
 app = FastAPI()
 
@@ -43,6 +44,7 @@ ROUTERS = [
     (reviews_router, "Reviews"),
     (payments_router, "Payments"),
     (checkout_router, "Checkout"),
+    (wishlist_router, "Wishlist"),
 ]
 
 for router, tag in ROUTERS:

@@ -14,4 +14,5 @@ from .coupon import Coupon
 from .customer_profile import CustomerProfile
 from .address import Address
 from .review import Review
+from .wishlist import Wishlist
 from app.models.payment import Payment
