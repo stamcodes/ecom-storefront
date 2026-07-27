@@ -206,8 +206,7 @@ async def make_order_item(db, make_product_variant):
 
         order = Order(
             customer_id=customer_profile_id,
-            customer_name="Test Customer",
-            status="completed",
+            order_status="completed",
             total_amount=float(variant.price) * quantity,
         )
         db.add(order)

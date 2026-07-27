@@ -63,8 +63,7 @@ async def checkout(
 
     new_order = Order(
         customer_id=profile.id,
-        customer_name=current_user.name,
-        status="open",
+        order_status="open",
         total_amount=0,
     )
     db.add(new_order)

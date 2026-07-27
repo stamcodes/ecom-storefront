@@ -39,6 +39,29 @@ class Order(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     placed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    def __init__(self, **kwargs):
+        if "status" in kwargs and "order_status" not in kwargs:
+            kwargs["order_status"] = kwargs.pop("status")
+        if "customer_name" in kwargs:
+            self._customer_name = kwargs.pop("customer_name")
+        super().__init__(**kwargs)
+
+    @property
+    def status(self) -> str:
+        return self.order_status
+
+    @status.setter
+    def status(self, value: str) -> None:
+        self.order_status = value
+
+    @property
+    def customer_name(self) -> str | None:
+        return getattr(self, "_customer_name", None)
+
+    @customer_name.setter
+    def customer_name(self, value: str | None) -> None:
+        self._customer_name = value
+
     # Relationships
     items: Mapped[list["OrderItem"]] = relationship(
         back_populates="order",

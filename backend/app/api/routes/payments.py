@@ -106,7 +106,7 @@ async def _create_order_from_cart(db: AsyncSession, cart_id: int, customer_id: i
 
     new_order = Order(
         customer_id=profile.id,
-        status="paid",
+        order_status="paid",
         total_amount=0,
     )
     db.add(new_order)

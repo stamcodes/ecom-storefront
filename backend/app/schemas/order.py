@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.order_item import OrderItemOut
 
@@ -7,6 +7,7 @@ from app.schemas.order_item import OrderItemOut
 class OrderOut(BaseModel):
     id: int
     customer_id: int | None = None
+    status: str | None = None
     guest_name: str | None = None
     guest_email: str | None = None
     guest_phone: str | None = None
@@ -25,6 +26,15 @@ class OrderOut(BaseModel):
     items: list[OrderItemOut] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_status_compat(cls, data):
+        if isinstance(data, dict):
+            if data.get("status") is None and data.get("order_status") is not None:
+                data = dict(data)
+                data["status"] = data["order_status"]
+        return data
 
 
 class OrderCreate(BaseModel):
