@@ -146,7 +146,7 @@ frontend/
   .github/
     copilot-instructions.md
   app/
-    _(auth)/
+    (auth)/
       forgot-password/
         page.tsx
       login/
@@ -158,7 +158,7 @@ frontend/
       verify-email/
         page.tsx
       layout.tsx
-    _(protected)/
+    (protected)/
       account/
         page.tsx
       addresses/
@@ -185,7 +185,7 @@ frontend/
       wishlist/
         page.tsx
       layout.tsx
-    _(public)/
+    (public)/
       about/
         page.tsx
       cart/
@@ -299,6 +299,7 @@ frontend/
   playwright.config.ts
   postcss.config.js
   PROGRESS.md
+  proxy.ts
   tsconfig.jest.json
   tsconfig.json
   update_progress.py
@@ -307,6 +308,68 @@ package.json
 ```
 
 # Files
+
+## File: frontend/proxy.ts
+````typescript
+import { NextRequest, NextResponse } from "next/server";
+
+const PROTECTED_PREFIXES = [
+  "/account",
+  "/addresses",
+  "/chat-history",
+  "/checkout",
+  "/notifications",
+  "/orders",
+  "/profile",
+  "/settings",
+  "/wishlist",
+];
+
+const AUTH_PREFIXES = ["/login", "/register", "/forgot-password", "/reset-password"];
+
+const ACCESS_TOKEN_COOKIE = "access_token";
+const REFRESH_TOKEN_COOKIE = "refresh_token";
+
+export function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  const hasSession =
+    request.cookies.has(ACCESS_TOKEN_COOKIE) || request.cookies.has(REFRESH_TOKEN_COOKIE);
+
+  const isProtected = PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  const isAuthPage = AUTH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+
+  if (isProtected && !hasSession) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("redirect", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  if (isAuthPage && hasSession) {
+    return NextResponse.redirect(new URL("/account", request.url));
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: [
+    "/account/:path*",
+    "/addresses/:path*",
+    "/chat-history/:path*",
+    "/checkout/:path*",
+    "/notifications/:path*",
+    "/orders/:path*",
+    "/profile/:path*",
+    "/settings/:path*",
+    "/wishlist/:path*",
+    "/login",
+    "/register",
+    "/forgot-password",
+    "/reset-password",
+  ],
+};
+````
 
 ## File: backend/alembic/versions/3d77d5196130_add_phone_and_avatar_to_users.py
 ````python
@@ -2189,196 +2252,6 @@ async def test_checkout_multiple_items_total(client, make_customer, auth_headers
     assert len(body["items"]) == 2
 ````
 
-## File: backend/tests/test_customer_auth.py
-````python
-import pytest
-from datetime import datetime, timedelta, timezone
-
-from sqlalchemy import select
-
-from app.models.user import User
-
-pytestmark = pytest.mark.asyncio
-
-
-async def test_register_success(client, mock_emails):
-    payload = {
-        "name": "Jane Doe",
-        "email": "jane@example.com",
-        "password": "StrongPass123!",
-        "phone_number": "+1234567890",
-    }
-    resp = await client.post("/customer/auth/register", json=payload)
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["email"] == "jane@example.com"
-    assert body["email_verified"] is False
-    assert len(mock_emails["verification"]) == 1
-    assert mock_emails["verification"][0][0] == "jane@example.com"
-
-
-async def test_register_duplicate_email(client, make_customer):
-    user, _ = await make_customer(email="dupe@example.com")
-    payload = {
-        "name": "Dupe",
-        "email": "dupe@example.com",
-        "password": "StrongPass123!",
-    }
-    resp = await client.post("/customer/auth/register", json=payload)
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "Email already registered"
-
-
-async def test_register_invalid_password_too_short(client):
-    payload = {"name": "Jane", "email": "jane2@example.com", "password": "short"}
-    resp = await client.post("/customer/auth/register", json=payload)
-    assert resp.status_code == 422
-
-
-async def test_login_success(client, make_customer):
-    user, password = await make_customer(email="login@example.com")
-    resp = await client.post("/customer/auth/login", json={"email": "login@example.com", "password": password})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "access_token" in body
-    assert body["token_type"] == "bearer"
-
-
-async def test_login_wrong_password(client, make_customer):
-    await make_customer(email="wrongpass@example.com")
-    resp = await client.post("/customer/auth/login", json={"email": "wrongpass@example.com", "password": "WrongPass!"})
-    assert resp.status_code == 401
-    assert resp.json()["detail"] == "Invalid email or password"
-
-
-async def test_login_nonexistent_email(client):
-    resp = await client.post("/customer/auth/login", json={"email": "nouser@example.com", "password": "whatever123"})
-    assert resp.status_code == 401
-
-
-async def test_login_inactive_account(client, make_customer):
-    await make_customer(email="inactive@example.com", active=False)
-    resp = await client.post("/customer/auth/login", json={"email": "inactive@example.com", "password": "Password123!"})
-    assert resp.status_code == 403
-    assert resp.json()["detail"] == "Account is inactive"
-
-
-async def test_verify_email_success(client, make_customer, db):
-    user, _ = await make_customer(email="verify@example.com", verified=False)
-    user.email_verification_token = "valid-token-123"
-    user.email_verification_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-    await db.commit()
-
-    resp = await client.post("/customer/auth/verify-email", json={"token": "valid-token-123"})
-    assert resp.status_code == 200
-
-    result = await db.execute(select(User).where(User.email == "verify@example.com"))
-    refreshed = result.scalar_one()
-    assert refreshed.email_verified is True
-    assert refreshed.email_verification_token is None
-
-
-async def test_verify_email_expired_token(client, make_customer, db):
-    user, _ = await make_customer(email="expired@example.com", verified=False)
-    user.email_verification_token = "expired-token"
-    user.email_verification_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
-    await db.commit()
-
-    resp = await client.post("/customer/auth/verify-email", json={"token": "expired-token"})
-    assert resp.status_code == 400
-
-
-async def test_verify_email_invalid_token(client):
-    resp = await client.post("/customer/auth/verify-email", json={"token": "does-not-exist"})
-    assert resp.status_code == 400
-
-
-async def test_resend_verification_unverified_user(client, make_customer, mock_emails):
-    await make_customer(email="resend@example.com", verified=False)
-    resp = await client.post("/customer/auth/resend-verification", json={"email": "resend@example.com"})
-    assert resp.status_code == 200
-    assert len(mock_emails["verification"]) == 1
-
-
-async def test_resend_verification_already_verified(client, make_customer, mock_emails):
-    await make_customer(email="already@example.com", verified=True)
-    resp = await client.post("/customer/auth/resend-verification", json={"email": "already@example.com"})
-    assert resp.status_code == 200
-    assert len(mock_emails["verification"]) == 0
-
-
-async def test_resend_verification_nonexistent_email_returns_generic(client, mock_emails):
-    resp = await client.post("/customer/auth/resend-verification", json={"email": "ghost@example.com"})
-    assert resp.status_code == 200
-    assert "If that email exists" in resp.json()["message"]
-    assert len(mock_emails["verification"]) == 0
-
-
-async def test_forgot_password_existing_active_user(client, make_customer, mock_emails):
-    await make_customer(email="forgot@example.com")
-    resp = await client.post("/customer/auth/forgot-password", json={"email": "forgot@example.com"})
-    assert resp.status_code == 200
-    assert len(mock_emails["reset"]) == 1
-
-
-async def test_forgot_password_nonexistent_email_returns_generic(client, mock_emails):
-    resp = await client.post("/customer/auth/forgot-password", json={"email": "ghost2@example.com"})
-    assert resp.status_code == 200
-    assert len(mock_emails["reset"]) == 0
-
-
-async def test_reset_password_success(client, make_customer, db):
-    user, _ = await make_customer(email="reset@example.com")
-    user.password_reset_token = "reset-token-123"
-    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-    await db.commit()
-
-    resp = await client.post(
-        "/customer/auth/reset-password",
-        json={"token": "reset-token-123", "new_password": "NewStrongPass123!"},
-    )
-    assert resp.status_code == 200
-
-    login_resp = await client.post(
-        "/customer/auth/login", json={"email": "reset@example.com", "password": "NewStrongPass123!"}
-    )
-    assert login_resp.status_code == 200
-
-
-async def test_reset_password_expired_token(client, make_customer, db):
-    user, _ = await make_customer(email="resetexp@example.com")
-    user.password_reset_token = "expired-reset-token"
-    user.password_reset_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
-    await db.commit()
-
-    resp = await client.post(
-        "/customer/auth/reset-password",
-        json={"token": "expired-reset-token", "new_password": "NewStrongPass123!"},
-    )
-    assert resp.status_code == 400
-
-
-async def test_reset_password_invalid_token(client):
-    resp = await client.post(
-        "/customer/auth/reset-password",
-        json={"token": "not-a-real-token", "new_password": "NewStrongPass123!"},
-    )
-    assert resp.status_code == 400
-
-
-async def test_reset_password_inactive_account(client, make_customer, db):
-    user, _ = await make_customer(email="resetinactive@example.com", active=False)
-    user.password_reset_token = "inactive-reset-token"
-    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-    await db.commit()
-
-    resp = await client.post(
-        "/customer/auth/reset-password",
-        json={"token": "inactive-reset-token", "new_password": "NewStrongPass123!"},
-    )
-    assert resp.status_code == 403
-````
-
 ## File: backend/tests/test_customer_order.py
 ````python
 import pytest
@@ -3677,7 +3550,7 @@ globs: "*"
 6. COMPREHENSIVE GUIDANCE: Do not give vague or high-level instructions. Instead of stating "make changes" or "write tests," explicitly guide step by step on how to execute those changes and write out the exact, actionable code blocks or testing logic required.
 ````
 
-## File: frontend/app/_(auth)/forgot-password/page.tsx
+## File: frontend/app/(auth)/forgot-password/page.tsx
 ````typescript
 export default function ForgotPasswordPage() {
   return (
@@ -3694,22 +3567,124 @@ export default function ForgotPasswordPage() {
 }
 ````
 
-## File: frontend/app/_(auth)/login/page.tsx
+## File: frontend/app/(auth)/login/page.tsx
 ````typescript
+"use client";
+
+import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { loginSchema, LoginSchemaType } from "@/lib/validation/auth";
+import { useAuthStore } from "@/lib/stores/authStore";
+import { ApiError } from "@/lib/api/client";
+
 export default function LoginPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("redirect") || "/account";
+  const login = useAuthStore((state) => state.login);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<LoginSchemaType>({
+    resolver: zodResolver(loginSchema),
+  });
+
+  const onSubmit = async (data: LoginSchemaType) => {
+    setFormError(null);
+    try {
+      await login(data);
+      router.replace(redirectTo);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setFormError(error.message);
+      } else {
+        setFormError("We couldn't sign you in. Please try again.");
+      }
+    }
+  };
+
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-white px-4">
-      <div className="w-full max-w-md space-y-4 text-center">
-        <h1 className="text-2xl font-bold text-gray-900">Sign In</h1>
-        <p className="text-sm text-gray-600">Welcome back! Please enter your details to log in.</p>
-        {/* Login form code goes here later */}
+      <div className="w-full max-w-md space-y-6">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900">Sign In</h1>
+          <p className="mt-1 text-sm text-gray-600">
+            Welcome back! Please enter your details to log in.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+          {formError && (
+            <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+              {formError}
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="email"
+              {...register("email")}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
+            />
+            {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>}
+          </div>
+
+          <div>
+            <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              {...register("password")}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
+            />
+            {errors.password && (
+              <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
+            )}
+          </div>
+
+          <div className="flex justify-end">
+            <Link href="/forgot-password" className="text-sm text-gray-600 hover:text-gray-900">
+              Forgot password?
+            </Link>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoading ? "Signing in..." : "Sign In"}
+          </button>
+        </form>
+
+        <p className="text-center text-sm text-gray-600">
+          Don&apos;t have an account?{" "}
+          <Link href="/register" className="font-medium text-gray-900 hover:underline">
+            Create one
+          </Link>
+        </p>
       </div>
     </div>
   );
 }
 ````
 
-## File: frontend/app/_(auth)/register/page.tsx
+## File: frontend/app/(auth)/register/page.tsx
 ````typescript
 export default function RegisterPage() {
   return (
@@ -3725,7 +3700,7 @@ export default function RegisterPage() {
 }
 ````
 
-## File: frontend/app/_(auth)/reset-password/page.tsx
+## File: frontend/app/(auth)/reset-password/page.tsx
 ````typescript
 export default function ResetPasswordPage() {
   return (
@@ -3741,7 +3716,7 @@ export default function ResetPasswordPage() {
 }
 ````
 
-## File: frontend/app/_(auth)/verify-email/page.tsx
+## File: frontend/app/(auth)/verify-email/page.tsx
 ````typescript
 export default function VerifyEmailPage() {
   return (
@@ -3757,159 +3732,351 @@ export default function VerifyEmailPage() {
 }
 ````
 
-## File: frontend/app/_(auth)/layout.tsx
+## File: frontend/app/(auth)/layout.tsx
 ````typescript
 
 ````
 
-## File: frontend/app/_(protected)/account/page.tsx
+## File: frontend/app/(protected)/account/page.tsx
 ````typescript
-
+export default function AccountPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Account</h1>
+      <p className="mt-2 text-sm text-gray-600">Your account dashboard.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/addresses/page.tsx
+## File: frontend/app/(protected)/addresses/page.tsx
 ````typescript
-
+export default function AddressesPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Addresses</h1>
+      <p className="mt-2 text-sm text-gray-600">Manage your saved addresses.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/chat-history/page.tsx
+## File: frontend/app/(protected)/chat-history/page.tsx
 ````typescript
-
+export default function ChatHistoryPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Chat History</h1>
+      <p className="mt-2 text-sm text-gray-600">Your past support conversations.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/checkout/order-confirmation/[orderId]/page.tsx
+## File: frontend/app/(protected)/checkout/order-confirmation/[orderId]/page.tsx
 ````typescript
-
+export default function OrderConfirmationPage({ params }: { params: { orderId: string } }) {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Order Confirmed</h1>
+      <p className="mt-2 text-sm text-gray-600">Order #{params.orderId}</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/checkout/page.tsx
+## File: frontend/app/(protected)/checkout/page.tsx
 ````typescript
-
+export default function CheckoutPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Checkout</h1>
+      <p className="mt-2 text-sm text-gray-600">Complete your purchase.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/notifications/page.tsx
+## File: frontend/app/(protected)/notifications/page.tsx
 ````typescript
-
+export default function NotificationsPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
+      <p className="mt-2 text-sm text-gray-600">Your recent notifications.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/orders/[orderId]/return/page.tsx
+## File: frontend/app/(protected)/orders/[orderId]/return/page.tsx
 ````typescript
-
+export default function OrderReturnPage({ params }: { params: { orderId: string } }) {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Return Request</h1>
+      <p className="mt-2 text-sm text-gray-600">Order #{params.orderId}</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/orders/[orderId]/page.tsx
+## File: frontend/app/(protected)/orders/[orderId]/page.tsx
 ````typescript
-
+export default function OrderDetailPage({ params }: { params: { orderId: string } }) {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Order Detail</h1>
+      <p className="mt-2 text-sm text-gray-600">Order #{params.orderId}</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/orders/page.tsx
+## File: frontend/app/(protected)/orders/page.tsx
 ````typescript
-
+export default function OrdersPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Orders</h1>
+      <p className="mt-2 text-sm text-gray-600">Your order history.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/profile/page.tsx
+## File: frontend/app/(protected)/profile/page.tsx
 ````typescript
-
+export default function ProfilePage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Profile</h1>
+      <p className="mt-2 text-sm text-gray-600">Manage your profile details.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/settings/page.tsx
+## File: frontend/app/(protected)/settings/page.tsx
 ````typescript
-
+export default function SettingsPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+      <p className="mt-2 text-sm text-gray-600">Manage your account settings.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/wishlist/page.tsx
+## File: frontend/app/(protected)/wishlist/page.tsx
 ````typescript
-
+export default function WishlistPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Wishlist</h1>
+      <p className="mt-2 text-sm text-gray-600">Products you've saved.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(protected)/layout.tsx
+## File: frontend/app/(protected)/layout.tsx
 ````typescript
-
+export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
 ````
 
-## File: frontend/app/_(public)/about/page.tsx
+## File: frontend/app/(public)/about/page.tsx
 ````typescript
-
+export default function AboutPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">About Us</h1>
+      <p className="mt-2 text-sm text-gray-600">Learn more about our store.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/cart/page.tsx
+## File: frontend/app/(public)/cart/page.tsx
 ````typescript
-
+export default function CartPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Your Cart</h1>
+      <p className="mt-2 text-sm text-gray-600">Items in your shopping cart.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/categories/[slug]/page.tsx
+## File: frontend/app/(public)/categories/[slug]/page.tsx
 ````typescript
-
+export default function CategoryProductsPage({ params }: { params: { slug: string } }) {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Category: {params.slug}</h1>
+      <p className="mt-2 text-sm text-gray-600">Products in this category.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/categories/page.tsx
+## File: frontend/app/(public)/categories/page.tsx
 ````typescript
-
+export default function CategoriesPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Categories</h1>
+      <p className="mt-2 text-sm text-gray-600">Browse all product categories.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/contact/page.tsx
+## File: frontend/app/(public)/contact/page.tsx
 ````typescript
-
+export default function ContactPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Contact Us</h1>
+      <p className="mt-2 text-sm text-gray-600">Get in touch with our team.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/faq/page.tsx
+## File: frontend/app/(public)/faq/page.tsx
 ````typescript
-
+export default function FaqPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">FAQ</h1>
+      <p className="mt-2 text-sm text-gray-600">Frequently asked questions.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/privacy/page.tsx
+## File: frontend/app/(public)/privacy/page.tsx
 ````typescript
-
+export default function PrivacyPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Privacy Policy</h1>
+      <p className="mt-2 text-sm text-gray-600">How we handle your data.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/products/[slug]/loading.tsx
+## File: frontend/app/(public)/products/[slug]/loading.tsx
 ````typescript
-
+export default function ProductDetailLoading() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12 text-sm text-gray-500">Loading product...</div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/products/[slug]/page.tsx
+## File: frontend/app/(public)/products/[slug]/page.tsx
 ````typescript
-
+export default function ProductDetailPage({ params }: { params: { slug: string } }) {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Product: {params.slug}</h1>
+      <p className="mt-2 text-sm text-gray-600">Product details go here.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/products/loading.tsx
+## File: frontend/app/(public)/products/loading.tsx
 ````typescript
-
+export default function ProductsLoading() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12 text-sm text-gray-500">Loading products...</div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/products/page.tsx
+## File: frontend/app/(public)/products/page.tsx
 ````typescript
-
+export default function ProductsPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Products</h1>
+      <p className="mt-2 text-sm text-gray-600">Browse all products.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/return-policy/page.tsx
+## File: frontend/app/(public)/return-policy/page.tsx
 ````typescript
-
+export default function ReturnPolicyPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Return Policy</h1>
+      <p className="mt-2 text-sm text-gray-600">Our return and refund policy.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/search/page.tsx
+## File: frontend/app/(public)/search/page.tsx
 ````typescript
-
+export default function SearchPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Search Results</h1>
+      <p className="mt-2 text-sm text-gray-600">Results matching your search.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/terms/page.tsx
+## File: frontend/app/(public)/terms/page.tsx
 ````typescript
-
+export default function TermsPage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12">
+      <h1 className="text-2xl font-bold text-gray-900">Terms &amp; Conditions</h1>
+      <p className="mt-2 text-sm text-gray-600">Terms of use for our store.</p>
+    </div>
+  );
+}
 ````
 
-## File: frontend/app/_(public)/layout.tsx
+## File: frontend/app/(public)/layout.tsx
 ````typescript
-
+export default function PublicLayout({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
 ````
 
-## File: frontend/app/_(public)/loading.tsx
+## File: frontend/app/(public)/loading.tsx
 ````typescript
-
+export default function PublicLoading() {
+  return <div className="mx-auto max-w-4xl px-4 py-12 text-sm text-gray-500">Loading...</div>;
+}
 ````
 
-## File: frontend/app/_(public)/page.tsx
+## File: frontend/app/(public)/page.tsx
 ````typescript
-
+export default function HomePage() {
+  return (
+    <div className="mx-auto max-w-4xl px-4 py-12 text-center">
+      <h1 className="text-2xl font-bold text-gray-900">E-Commerce Storefront</h1>
+      <p className="mt-2 text-sm text-gray-600">Welcome to the store.</p>
+      <button className="mt-6 rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">
+        Browse Products
+      </button>
+    </div>
+  );
+}
 ````
 
 ## File: frontend/app/api/auth/login/route.ts
@@ -4786,245 +4953,6 @@ async def checkout(
         select(Order).options(selectinload(Order.items)).where(Order.id == new_order.id)
     )
     return result.scalar_one()
-````
-
-## File: backend/app/api/routes/customer_auth.py
-````python
-import secrets
-from datetime import datetime, timedelta, timezone
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
-
-from app.database.session import get_db
-from app.models.user import User
-from app.models.customer_profile import CustomerProfile
-from app.schemas.customer_auth import (
-    CustomerRegisterRequest,
-    CustomerRegisterResponse,
-    CustomerLoginRequest,
-    CustomerToken,
-    CustomerRefreshRequest,
-    CustomerVerifyEmailRequest,
-    CustomerResendVerificationRequest,
-    CustomerForgotPasswordRequest,
-    CustomerResetPasswordRequest,
-    MsgResponse,
-)
-from app.core.security import hash_password, verify_password
-from app.core.jwt import create_access_token, create_refresh_token
-from app.core.email import send_verification_email, send_password_reset_email
-
-router = APIRouter(prefix="/customer/auth", tags=["Customer Auth"])
-
-CUSTOMER_ROLE_ID = 4
-VERIFICATION_TOKEN_EXPIRE_HOURS = 24
-RESET_TOKEN_EXPIRE_HOURS = 1
-
-
-def _issue_tokens(user: User) -> CustomerToken:
-    access_token = create_access_token(
-        {"sub": str(user.id), "email": user.email, "role_id": user.role_id}
-    )
-    refresh_token, refresh_expires_at = create_refresh_token()
-    user.refresh_token = refresh_token
-    user.refresh_token_expires_at = refresh_expires_at
-    return CustomerToken(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
-
-
-@router.post("/register", response_model=CustomerRegisterResponse, status_code=status.HTTP_201_CREATED)
-async def customer_register(payload: CustomerRegisterRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.email == payload.email)
-    result = await db.execute(stmt)
-    existing = result.scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    verification_token = secrets.token_urlsafe(32)
-
-    new_user = User(
-        name=payload.name,
-        email=payload.email,
-        password=hash_password(payload.password),
-        phone_number=payload.phone_number,
-        role_id=CUSTOMER_ROLE_ID,
-        is_active=True,
-        email_verified=False,
-        email_verification_token=verification_token,
-        email_verification_expires_at=datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRE_HOURS),
-    )
-    db.add(new_user)
-
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=400, detail="Could not create account")
-
-    await db.refresh(new_user)
-
-    profile = CustomerProfile(user_id=new_user.id)
-    db.add(profile)
-    await db.commit()
-
-    send_verification_email(new_user.email, verification_token)
-
-    return CustomerRegisterResponse(
-        id=new_user.id,
-        name=new_user.name,
-        email=new_user.email,
-        email_verified=new_user.email_verified,
-        message="Account created. Check your email to verify your account.",
-    )
-
-
-@router.post("/login", response_model=CustomerToken)
-async def customer_login(payload: CustomerLoginRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.email == payload.email)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-
-    if not user or user.role_id != CUSTOMER_ROLE_ID:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-
-    if not verify_password(payload.password, user.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
-
-    token = _issue_tokens(user)
-    await db.commit()
-
-    return token
-
-
-@router.post("/refresh", response_model=CustomerToken)
-async def customer_refresh(payload: CustomerRefreshRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.refresh_token == payload.refresh_token)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-
-    if not user.refresh_token_expires_at or user.refresh_token_expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
-
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
-
-    token = _issue_tokens(user)  # rotates refresh token
-    await db.commit()
-
-    return token
-
-
-@router.post("/logout", response_model=MsgResponse)
-async def customer_logout(payload: CustomerRefreshRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.refresh_token == payload.refresh_token)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-
-    if user:
-        user.refresh_token = None
-        user.refresh_token_expires_at = None
-        await db.commit()
-
-    return MsgResponse(message="Logged out successfully.")
-
-
-@router.post("/verify-email", response_model=MsgResponse)
-async def customer_verify_email(payload: CustomerVerifyEmailRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.email_verification_token == payload.token)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(status_code=400, detail="Invalid or expired verification link")
-
-    if (
-        not user.email_verification_expires_at
-        or user.email_verification_expires_at < datetime.now(timezone.utc)
-    ):
-        raise HTTPException(status_code=400, detail="Invalid or expired verification link")
-
-    user.email_verified = True
-    user.email_verification_token = None
-    user.email_verification_expires_at = None
-    await db.commit()
-
-    return MsgResponse(message="Email verified successfully. You can now log in.")
-
-
-@router.post("/resend-verification", response_model=MsgResponse)
-async def customer_resend_verification(payload: CustomerResendVerificationRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.email == payload.email, User.role_id == CUSTOMER_ROLE_ID)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-
-    generic_response = MsgResponse(message="If that email exists and is unverified, a new link has been sent.")
-
-    if not user or user.email_verified:
-        return generic_response
-
-    token = secrets.token_urlsafe(32)
-    user.email_verification_token = token
-    user.email_verification_expires_at = datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRE_HOURS)
-    await db.commit()
-
-    send_verification_email(user.email, token)
-
-    return generic_response
-
-
-@router.post("/forgot-password", response_model=MsgResponse)
-async def customer_forgot_password(payload: CustomerForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.email == payload.email, User.role_id == CUSTOMER_ROLE_ID)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-
-    generic_response = MsgResponse(message="If that email exists, a password reset link has been sent.")
-
-    if not user or not user.is_active:
-        return generic_response
-
-    token = secrets.token_urlsafe(32)
-    user.password_reset_token = token
-    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(hours=RESET_TOKEN_EXPIRE_HOURS)
-    await db.commit()
-
-    send_password_reset_email(user.email, token)
-
-    return generic_response
-
-
-@router.post("/reset-password", response_model=MsgResponse)
-async def customer_reset_password(payload: CustomerResetPasswordRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.password_reset_token == payload.token, User.role_id == CUSTOMER_ROLE_ID)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(status_code=400, detail="Invalid or expired token")
-
-    if (
-        not user.password_reset_expires_at
-        or user.password_reset_expires_at < datetime.now(timezone.utc)
-    ):
-        raise HTTPException(status_code=400, detail="Invalid or expired token")
-
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="Account is inactive")
-
-    user.password = hash_password(payload.new_password)
-    user.password_reset_token = None
-    user.password_reset_expires_at = None
-    await db.commit()
-
-    return MsgResponse(message="Password reset successfully. Please log in with your new password.")
 ````
 
 ## File: backend/app/api/routes/customer_order.py
@@ -6042,63 +5970,6 @@ class CategoryUpdate(BaseModel):
     description: str | None = None
 ````
 
-## File: backend/app/schemas/customer_auth.py
-````python
-from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
-
-
-class CustomerRegisterRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    email: EmailStr
-    password: str = Field(min_length=8)
-    phone_number: str | None = None
-
-
-class CustomerRegisterResponse(BaseModel):
-    id: int
-    name: str
-    email: str
-    email_verified: bool
-    message: str
-
-
-class CustomerLoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class CustomerToken(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str
-
-
-class CustomerRefreshRequest(BaseModel):
-    refresh_token: str
-
-
-class CustomerVerifyEmailRequest(BaseModel):
-    token: str
-
-
-class CustomerResendVerificationRequest(BaseModel):
-    email: EmailStr
-
-
-class CustomerForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-
-class CustomerResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str = Field(min_length=8)
-
-
-class MsgResponse(BaseModel):
-    message: str
-````
-
 ## File: backend/app/schemas/customer_order.py
 ````python
 from datetime import datetime
@@ -6182,6 +6053,212 @@ class UserUpdate(BaseModel):
     avatar_url: str | None = None
     role_id: int | None = None
     is_active: bool | None = None
+````
+
+## File: backend/tests/test_customer_auth.py
+````python
+import pytest
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select
+
+from app.models.user import User
+
+pytestmark = pytest.mark.asyncio
+
+
+async def test_register_success(client, mock_emails):
+    payload = {
+        "name": "Jane Doe",
+        "email": "jane@example.com",
+        "password": "StrongPass123!",
+        "phone_number": "+1234567890",
+    }
+    resp = await client.post("/customer/auth/register", json=payload)
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["email"] == "jane@example.com"
+    assert body["email_verified"] is False
+    assert len(mock_emails["verification"]) == 1
+    assert mock_emails["verification"][0][0] == "jane@example.com"
+
+
+async def test_register_duplicate_email(client, make_customer):
+    user, _ = await make_customer(email="dupe@example.com")
+    payload = {
+        "name": "Dupe",
+        "email": "dupe@example.com",
+        "password": "StrongPass123!",
+    }
+    resp = await client.post("/customer/auth/register", json=payload)
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Email already registered"
+
+
+async def test_register_invalid_password_too_short(client):
+    payload = {"name": "Jane", "email": "jane2@example.com", "password": "short"}
+    resp = await client.post("/customer/auth/register", json=payload)
+    assert resp.status_code == 422
+
+
+async def test_login_success(client, make_customer):
+    user, password = await make_customer(email="login@example.com")
+    resp = await client.post("/customer/auth/login", json={"email": "login@example.com", "password": password})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["message"] == "Logged in successfully."
+    set_cookie_header = resp.headers.get("set-cookie", "")
+    assert "access_token=" in set_cookie_header
+    assert "refresh_token=" in set_cookie_header
+    assert "HttpOnly" in set_cookie_header
+
+
+async def test_me_uses_access_cookie(client, make_customer):
+    user, password = await make_customer(email="me-cookie@example.com")
+    login_resp = await client.post(
+        "/customer/auth/login",
+        json={"email": "me-cookie@example.com", "password": password},
+    )
+    assert login_resp.status_code == 200
+
+    me_resp = await client.get("/customer/auth/me")
+    assert me_resp.status_code == 200
+    assert me_resp.json()["email"] == user.email
+
+
+async def test_login_wrong_password(client, make_customer):
+    await make_customer(email="wrongpass@example.com")
+    resp = await client.post("/customer/auth/login", json={"email": "wrongpass@example.com", "password": "WrongPass!"})
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid email or password"
+
+
+async def test_login_nonexistent_email(client):
+    resp = await client.post("/customer/auth/login", json={"email": "nouser@example.com", "password": "whatever123"})
+    assert resp.status_code == 401
+
+
+async def test_login_inactive_account(client, make_customer):
+    await make_customer(email="inactive@example.com", active=False)
+    resp = await client.post("/customer/auth/login", json={"email": "inactive@example.com", "password": "Password123!"})
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Account is inactive"
+
+
+async def test_verify_email_success(client, make_customer, db):
+    user, _ = await make_customer(email="verify@example.com", verified=False)
+    user.email_verification_token = "valid-token-123"
+    user.email_verification_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    await db.commit()
+
+    resp = await client.post("/customer/auth/verify-email", json={"token": "valid-token-123"})
+    assert resp.status_code == 200
+
+    result = await db.execute(select(User).where(User.email == "verify@example.com"))
+    refreshed = result.scalar_one()
+    assert refreshed.email_verified is True
+    assert refreshed.email_verification_token is None
+
+
+async def test_verify_email_expired_token(client, make_customer, db):
+    user, _ = await make_customer(email="expired@example.com", verified=False)
+    user.email_verification_token = "expired-token"
+    user.email_verification_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    await db.commit()
+
+    resp = await client.post("/customer/auth/verify-email", json={"token": "expired-token"})
+    assert resp.status_code == 400
+
+
+async def test_verify_email_invalid_token(client):
+    resp = await client.post("/customer/auth/verify-email", json={"token": "does-not-exist"})
+    assert resp.status_code == 400
+
+
+async def test_resend_verification_unverified_user(client, make_customer, mock_emails):
+    await make_customer(email="resend@example.com", verified=False)
+    resp = await client.post("/customer/auth/resend-verification", json={"email": "resend@example.com"})
+    assert resp.status_code == 200
+    assert len(mock_emails["verification"]) == 1
+
+
+async def test_resend_verification_already_verified(client, make_customer, mock_emails):
+    await make_customer(email="already@example.com", verified=True)
+    resp = await client.post("/customer/auth/resend-verification", json={"email": "already@example.com"})
+    assert resp.status_code == 200
+    assert len(mock_emails["verification"]) == 0
+
+
+async def test_resend_verification_nonexistent_email_returns_generic(client, mock_emails):
+    resp = await client.post("/customer/auth/resend-verification", json={"email": "ghost@example.com"})
+    assert resp.status_code == 200
+    assert "If that email exists" in resp.json()["message"]
+    assert len(mock_emails["verification"]) == 0
+
+
+async def test_forgot_password_existing_active_user(client, make_customer, mock_emails):
+    await make_customer(email="forgot@example.com")
+    resp = await client.post("/customer/auth/forgot-password", json={"email": "forgot@example.com"})
+    assert resp.status_code == 200
+    assert len(mock_emails["reset"]) == 1
+
+
+async def test_forgot_password_nonexistent_email_returns_generic(client, mock_emails):
+    resp = await client.post("/customer/auth/forgot-password", json={"email": "ghost2@example.com"})
+    assert resp.status_code == 200
+    assert len(mock_emails["reset"]) == 0
+
+
+async def test_reset_password_success(client, make_customer, db):
+    user, _ = await make_customer(email="reset@example.com")
+    user.password_reset_token = "reset-token-123"
+    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    await db.commit()
+
+    resp = await client.post(
+        "/customer/auth/reset-password",
+        json={"token": "reset-token-123", "new_password": "NewStrongPass123!"},
+    )
+    assert resp.status_code == 200
+
+    login_resp = await client.post(
+        "/customer/auth/login", json={"email": "reset@example.com", "password": "NewStrongPass123!"}
+    )
+    assert login_resp.status_code == 200
+
+
+async def test_reset_password_expired_token(client, make_customer, db):
+    user, _ = await make_customer(email="resetexp@example.com")
+    user.password_reset_token = "expired-reset-token"
+    user.password_reset_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    await db.commit()
+
+    resp = await client.post(
+        "/customer/auth/reset-password",
+        json={"token": "expired-reset-token", "new_password": "NewStrongPass123!"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_reset_password_invalid_token(client):
+    resp = await client.post(
+        "/customer/auth/reset-password",
+        json={"token": "not-a-real-token", "new_password": "NewStrongPass123!"},
+    )
+    assert resp.status_code == 400
+
+
+async def test_reset_password_inactive_account(client, make_customer, db):
+    user, _ = await make_customer(email="resetinactive@example.com", active=False)
+    user.password_reset_token = "inactive-reset-token"
+    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    await db.commit()
+
+    resp = await client.post(
+        "/customer/auth/reset-password",
+        json={"token": "inactive-reset-token", "new_password": "NewStrongPass123!"},
+    )
+    assert resp.status_code == 403
 ````
 
 ## File: backend/alembic.ini
@@ -6456,212 +6533,6 @@ export async function clearCart(signal?: AbortSignal): Promise<ApiResponse<null>
 }
 ````
 
-## File: frontend/lib/api/client.ts
-````typescript
-import { ApiErrorResponse } from "@/types/api";
-
-export type ApiErrorType = "http" | "parse" | "network" | "abort";
-
-export class ApiError extends Error {
-  status: number;
-  detail: string | Array<{ loc: (string | number)[]; msg: string; type: string }> | null;
-  errorType: ApiErrorType;
-
-  constructor(
-    status: number,
-    message: string,
-    errorType: ApiErrorType,
-    detail: string | Array<{ loc: (string | number)[]; msg: string; type: string }> | null = null
-  ) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.errorType = errorType;
-    this.detail = detail;
-  }
-}
-
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-const DEFAULT_TIMEOUT_MS = 15000;
-
-let refreshPromise: Promise<string> | null = null;
-
-async function refreshAccessToken(): Promise<string> {
-  if (refreshPromise) {
-    return refreshPromise;
-  }
-
-  refreshPromise = (async () => {
-    const response = await fetch(`${BASE_URL}/auth/refresh`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-    });
-
-    if (!response.ok) {
-      throw new ApiError(response.status, "Session expired. Please log in again.", "http");
-    }
-
-    const data = (await response.json()) as { data?: { accessToken?: string } };
-    const accessToken = data?.data?.accessToken;
-
-    if (!accessToken) {
-      throw new ApiError(500, "Session refresh failed. Please log in again.", "parse");
-    }
-
-    return accessToken;
-  })();
-
-  try {
-    return await refreshPromise;
-  } finally {
-    refreshPromise = null;
-  }
-}
-
-interface RequestOptions extends RequestInit {
-  timeoutMs?: number;
-  signal?: AbortSignal;
-  skipAuthRetry?: boolean;
-}
-
-async function parseResponseBody(response: Response): Promise<unknown> {
-  const contentType = response.headers.get("Content-Type");
-  const isJson = contentType !== null && contentType.includes("application/json");
-  const rawText = await response.text();
-
-  if (rawText.length === 0) {
-    return null;
-  }
-
-  if (isJson) {
-    try {
-      return JSON.parse(rawText);
-    } catch {
-      throw new ApiError(
-        response.status,
-        "The server returned a malformed response. Please try again.",
-        "parse"
-      );
-    }
-  }
-
-  return rawText;
-}
-
-async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const {
-    timeoutMs = DEFAULT_TIMEOUT_MS,
-    signal: externalSignal,
-    skipAuthRetry,
-    ...init
-  } = options;
-
-  const url = `${BASE_URL}${endpoint}`;
-
-  const headers = new Headers(init.headers);
-  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
-
-  const onExternalAbort = () => timeoutController.abort();
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      timeoutController.abort();
-    } else {
-      externalSignal.addEventListener("abort", onExternalAbort);
-    }
-  }
-
-  const config: RequestInit = {
-    ...init,
-    headers,
-    credentials: "include",
-    signal: timeoutController.signal,
-  };
-
-  try {
-    let response: Response;
-    try {
-      response = await fetch(url, config);
-    } catch (fetchError) {
-      if (fetchError instanceof DOMException && fetchError.name === "AbortError") {
-        if (externalSignal?.aborted) {
-          throw new ApiError(0, "Request was cancelled.", "abort");
-        }
-        throw new ApiError(0, "The request timed out. Please try again.", "network");
-      }
-      throw new ApiError(0, "Unable to reach the server. Check your connection.", "network");
-    }
-
-    if (response.status === 204) {
-      return {} as T;
-    }
-
-    if (response.status === 401 && !skipAuthRetry && endpoint !== "/auth/refresh") {
-      try {
-        await refreshAccessToken();
-      } catch {
-        throw new ApiError(401, "Your session has expired. Please log in again.", "http");
-      }
-      return request<T>(endpoint, { ...options, skipAuthRetry: true });
-    }
-
-    const responseData = await parseResponseBody(response);
-
-    if (!response.ok) {
-      const errorData = responseData as ApiErrorResponse | null;
-      let errorMessage = "An unexpected error occurred. Please try again.";
-
-      if (errorData && typeof errorData.detail === "string") {
-        errorMessage = errorData.detail;
-      } else if (errorData && Array.isArray(errorData.detail)) {
-        errorMessage = errorData.detail.map((err) => `${err.loc.join(".")}: ${err.msg}`).join(", ");
-      } else if (errorData && errorData.message) {
-        errorMessage = errorData.message;
-      }
-
-      throw new ApiError(response.status, errorMessage, "http", errorData?.detail ?? null);
-    }
-
-    return responseData as T;
-  } finally {
-    clearTimeout(timeoutId);
-    if (externalSignal) {
-      externalSignal.removeEventListener("abort", onExternalAbort);
-    }
-  }
-}
-
-export const apiClient = {
-  get: <T>(endpoint: string, options?: RequestOptions): Promise<T> =>
-    request<T>(endpoint, { ...options, method: "GET" }),
-  post: <T>(endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> =>
-    request<T>(endpoint, {
-      ...options,
-      method: "POST",
-      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
-    }),
-  put: <T>(endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> =>
-    request<T>(endpoint, {
-      ...options,
-      method: "PUT",
-      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
-    }),
-  patch: <T>(endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> =>
-    request<T>(endpoint, {
-      ...options,
-      method: "PATCH",
-      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
-    }),
-  delete: <T>(endpoint: string, options?: RequestOptions): Promise<T> =>
-    request<T>(endpoint, { ...options, method: "DELETE" }),
-};
-````
-
 ## File: frontend/lib/api/orders.ts
 ````typescript
 import { apiClient, ApiError } from "./client";
@@ -6841,119 +6712,6 @@ export async function getCategories(signal?: AbortSignal): Promise<ApiResponse<s
     throw toUserFacingError(error, FALLBACK_MESSAGES.getCategories);
   }
 }
-````
-
-## File: frontend/lib/stores/authStore.ts
-````typescript
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import * as authApi from "@/lib/api/auth";
-import { CustomerProfile } from "@/types/user";
-import { LoginSchemaType, RegisterSchemaType } from "@/lib/validation/auth";
-
-interface AuthState {
-  accessToken: string | null;
-  refreshToken: string | null;
-  user: CustomerProfile | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-
-  login: (credentials: LoginSchemaType) => Promise<void>;
-  register: (data: RegisterSchemaType) => Promise<void>;
-  logout: () => Promise<void>;
-  refreshAccessToken: () => Promise<string>;
-  setUser: (user: CustomerProfile) => void;
-  clearAuth: () => void;
-}
-
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set: (partial: Partial<AuthState>) => void, get: () => AuthState) => ({
-      accessToken: null,
-      refreshToken: null,
-      user: null,
-      isAuthenticated: false,
-      isLoading: false,
-
-      login: async (credentials: LoginSchemaType) => {
-        set({ isLoading: true });
-        try {
-          const token = await authApi.login(credentials);
-          set({
-            accessToken: token.accessToken,
-            refreshToken: token.refreshToken,
-            isAuthenticated: true,
-            isLoading: false,
-          });
-        } catch (error) {
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
-      register: async (data: RegisterSchemaType) => {
-        set({ isLoading: true });
-        try {
-          await authApi.register(data);
-          set({ isLoading: false });
-        } catch (error) {
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
-      logout: async () => {
-        const { refreshToken } = get();
-        if (refreshToken) {
-          try {
-            await authApi.logout(refreshToken);
-          } catch {
-            // Ignore failures — clear local state regardless.
-          }
-        }
-        get().clearAuth();
-      },
-
-      refreshAccessToken: async () => {
-        const { refreshToken } = get();
-        if (!refreshToken) {
-          get().clearAuth();
-          throw new Error("No refresh token available");
-        }
-        try {
-          const token = await authApi.refreshToken(refreshToken);
-          set({
-            accessToken: token.accessToken,
-            refreshToken: token.refreshToken,
-            isAuthenticated: true,
-          });
-          return token.accessToken;
-        } catch (error) {
-          get().clearAuth();
-          throw error;
-        }
-      },
-
-      setUser: (user: CustomerProfile) => set({ user }),
-
-      clearAuth: () =>
-        set({
-          accessToken: null,
-          refreshToken: null,
-          user: null,
-          isAuthenticated: false,
-        }),
-    }),
-    {
-      name: "auth-storage",
-      partialize: (state: AuthState) => ({
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
-        isAuthenticated: state.isAuthenticated,
-      }),
-    }
-  )
-);
 ````
 
 ## File: frontend/lib/validation/address.ts
@@ -7214,6 +6972,309 @@ async def delete_category(
     await db.delete(category)
     await db.commit()
     return None
+````
+
+## File: backend/app/api/routes/customer_auth.py
+````python
+import secrets
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
+
+from app.database.session import get_db
+from app.models.user import User
+from app.models.customer_profile import CustomerProfile
+from app.schemas.customer_auth import (
+    CustomerRegisterRequest,
+    CustomerRegisterResponse,
+    CustomerLoginRequest,
+    CustomerAuthResponse,
+    CustomerRefreshRequest,
+    CustomerVerifyEmailRequest,
+    CustomerResendVerificationRequest,
+    CustomerForgotPasswordRequest,
+    CustomerResetPasswordRequest,
+    MsgResponse,
+)
+from app.core.security import hash_password, verify_password
+from app.core.jwt import create_access_token, create_refresh_token
+from app.core.email import send_verification_email, send_password_reset_email
+from app.core.auth import get_current_user
+from app.schemas.customer_profile import CustomerProfileOut
+
+router = APIRouter(prefix="/customer/auth", tags=["Customer Auth"])
+
+CUSTOMER_ROLE_ID = 4
+VERIFICATION_TOKEN_EXPIRE_HOURS = 24
+RESET_TOKEN_EXPIRE_HOURS = 1
+ACCESS_COOKIE_NAME = "access_token"
+REFRESH_COOKIE_NAME = "refresh_token"
+COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
+
+
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    response.set_cookie(
+        key=ACCESS_COOKIE_NAME,
+        value=access_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=60 * 60 * 24,
+        path="/",
+    )
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=COOKIE_MAX_AGE_SECONDS,
+        path="/",
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(ACCESS_COOKIE_NAME, path="/")
+    response.delete_cookie(REFRESH_COOKIE_NAME, path="/")
+
+
+def _issue_tokens(user: User) -> tuple[str, str]:
+    access_token = create_access_token(
+        {"sub": str(user.id), "email": user.email, "role_id": user.role_id}
+    )
+    refresh_token, refresh_expires_at = create_refresh_token()
+    user.refresh_token = refresh_token
+    user.refresh_token_expires_at = refresh_expires_at
+    return access_token, refresh_token
+
+
+@router.post("/register", response_model=CustomerRegisterResponse, status_code=status.HTTP_201_CREATED)
+async def customer_register(payload: CustomerRegisterRequest, db: AsyncSession = Depends(get_db)):
+    stmt = select(User).where(User.email == payload.email)
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    verification_token = secrets.token_urlsafe(32)
+
+    new_user = User(
+        name=payload.name,
+        email=payload.email,
+        password=hash_password(payload.password),
+        phone_number=payload.phone_number,
+        role_id=CUSTOMER_ROLE_ID,
+        is_active=True,
+        email_verified=False,
+        email_verification_token=verification_token,
+        email_verification_expires_at=datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRE_HOURS),
+    )
+    db.add(new_user)
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Could not create account")
+
+    await db.refresh(new_user)
+
+    profile = CustomerProfile(user_id=new_user.id)
+    db.add(profile)
+    await db.commit()
+
+    send_verification_email(new_user.email, verification_token)
+
+    return CustomerRegisterResponse(
+        id=new_user.id,
+        name=new_user.name,
+        email=new_user.email,
+        email_verified=new_user.email_verified,
+        message="Account created. Check your email to verify your account.",
+    )
+
+
+@router.post("/login", response_model=CustomerAuthResponse)
+async def customer_login(
+    payload: CustomerLoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(User).where(User.email == payload.email)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user or user.role_id != CUSTOMER_ROLE_ID:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    if not verify_password(payload.password, user.password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
+
+    access_token, refresh_token = _issue_tokens(user)
+    _set_auth_cookies(response, access_token, refresh_token)
+    await db.commit()
+
+    return CustomerAuthResponse(message="Logged in successfully.")
+
+
+@router.post("/refresh", response_model=CustomerAuthResponse)
+async def customer_refresh(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    stmt = select(User).where(User.refresh_token == refresh_token)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    if not user.refresh_token_expires_at or user.refresh_token_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
+
+    access_token, refresh_token = _issue_tokens(user)  # rotates refresh token
+    _set_auth_cookies(response, access_token, refresh_token)
+    await db.commit()
+
+    return CustomerAuthResponse(message="Session refreshed successfully.")
+
+
+@router.post("/logout", response_model=MsgResponse)
+async def customer_logout(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    stmt = select(User).where(User.refresh_token == refresh_token)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if user:
+        user.refresh_token = None
+        user.refresh_token_expires_at = None
+        await db.commit()
+
+    _clear_auth_cookies(response)
+    return MsgResponse(message="Logged out successfully.")
+
+
+@router.get("/me", response_model=CustomerProfileOut)
+async def customer_me(current_user: User = Depends(get_current_user)):
+    return CustomerProfileOut(
+        id=current_user.id,
+        name=current_user.name,
+        email=current_user.email,
+        phone_number=current_user.phone_number,
+        avatar_url=current_user.avatar_url,
+        email_verified=current_user.email_verified,
+        created_at=current_user.created_at,
+    )
+
+
+@router.post("/verify-email", response_model=MsgResponse)
+async def customer_verify_email(payload: CustomerVerifyEmailRequest, db: AsyncSession = Depends(get_db)):
+    stmt = select(User).where(User.email_verification_token == payload.token)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link")
+
+    if (
+        not user.email_verification_expires_at
+        or user.email_verification_expires_at < datetime.now(timezone.utc)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link")
+
+    user.email_verified = True
+    user.email_verification_token = None
+    user.email_verification_expires_at = None
+    await db.commit()
+
+    return MsgResponse(message="Email verified successfully. You can now log in.")
+
+
+@router.post("/resend-verification", response_model=MsgResponse)
+async def customer_resend_verification(payload: CustomerResendVerificationRequest, db: AsyncSession = Depends(get_db)):
+    stmt = select(User).where(User.email == payload.email, User.role_id == CUSTOMER_ROLE_ID)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    generic_response = MsgResponse(message="If that email exists and is unverified, a new link has been sent.")
+
+    if not user or user.email_verified:
+        return generic_response
+
+    token = secrets.token_urlsafe(32)
+    user.email_verification_token = token
+    user.email_verification_expires_at = datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRE_HOURS)
+    await db.commit()
+
+    send_verification_email(user.email, token)
+
+    return generic_response
+
+
+@router.post("/forgot-password", response_model=MsgResponse)
+async def customer_forgot_password(payload: CustomerForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    stmt = select(User).where(User.email == payload.email, User.role_id == CUSTOMER_ROLE_ID)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    generic_response = MsgResponse(message="If that email exists, a password reset link has been sent.")
+
+    if not user or not user.is_active:
+        return generic_response
+
+    token = secrets.token_urlsafe(32)
+    user.password_reset_token = token
+    user.password_reset_expires_at = datetime.now(timezone.utc) + timedelta(hours=RESET_TOKEN_EXPIRE_HOURS)
+    await db.commit()
+
+    send_password_reset_email(user.email, token)
+
+    return generic_response
+
+
+@router.post("/reset-password", response_model=MsgResponse)
+async def customer_reset_password(payload: CustomerResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+    stmt = select(User).where(User.password_reset_token == payload.token, User.role_id == CUSTOMER_ROLE_ID)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    if (
+        not user.password_reset_expires_at
+        or user.password_reset_expires_at < datetime.now(timezone.utc)
+    ):
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account is inactive")
+
+    user.password = hash_password(payload.new_password)
+    user.password_reset_token = None
+    user.password_reset_expires_at = None
+    await db.commit()
+
+    return MsgResponse(message="Password reset successfully. Please log in with your new password.")
 ````
 
 ## File: backend/app/api/routes/customer_profiles.py
@@ -7733,6 +7794,67 @@ class CartItem(Base):
     product_variant: Mapped["ProductVariant"] = relationship()
 ````
 
+## File: backend/app/schemas/customer_auth.py
+````python
+from datetime import datetime
+from pydantic import BaseModel, EmailStr, Field
+
+
+class CustomerRegisterRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    email: EmailStr
+    password: str = Field(min_length=8)
+    phone_number: str | None = None
+
+
+class CustomerRegisterResponse(BaseModel):
+    id: int
+    name: str
+    email: str
+    email_verified: bool
+    message: str
+
+
+class CustomerLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class CustomerToken(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str
+
+
+class CustomerAuthResponse(BaseModel):
+    message: str
+
+
+class CustomerRefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class CustomerVerifyEmailRequest(BaseModel):
+    token: str
+
+
+class CustomerResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class CustomerForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class CustomerResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+
+class MsgResponse(BaseModel):
+    message: str
+````
+
 ## File: backend/app/seed.py
 ````python
 import uuid
@@ -7904,141 +8026,206 @@ uvicorn==0.49.0
 stripe
 ````
 
-## File: frontend/lib/api/auth.ts
+## File: frontend/lib/api/client.ts
 ````typescript
-import { apiClient, ApiError } from "./client";
-import { AuthTokenResponse } from "@/types/api";
-import {
-  LoginSchemaType,
-  RegisterSchemaType,
-  ResetPasswordSchemaType,
-  ForgotPasswordSchemaType,
-} from "@/lib/validation/auth";
+import { ApiErrorResponse } from "@/types/api";
 
-const FALLBACK_MESSAGES = {
-  login: "We couldn't sign you in. Please check your credentials and try again.",
-  register: "We couldn't create your account. Please try again.",
-  refresh: "Your session has expired. Please log in again.",
-  logout: "We couldn't log you out. Please try again.",
-  forgotPassword: "We couldn't send the password reset email. Please try again.",
-  resetPassword: "We couldn't reset your password. Please try again.",
-  verifyEmail: "We couldn't verify your email. Please try again.",
-  resendVerification: "We couldn't resend the verification email. Please try again.",
-} as const;
+export type ApiErrorType = "http" | "parse" | "network" | "abort";
 
-function toUserFacingError(error: unknown, fallbackMessage: string): ApiError {
-  if (error instanceof ApiError) {
-    if (error.errorType === "network" || error.errorType === "parse") {
-      return new ApiError(error.status, fallbackMessage, error.errorType, error.detail);
+export class ApiError extends Error {
+  status: number;
+  detail: string | Array<{ loc: (string | number)[]; msg: string; type: string }> | null;
+  errorType: ApiErrorType;
+
+  constructor(
+    status: number,
+    message: string,
+    errorType: ApiErrorType,
+    detail: string | Array<{ loc: (string | number)[]; msg: string; type: string }> | null = null
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.errorType = errorType;
+    this.detail = detail;
+  }
+}
+
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const DEFAULT_TIMEOUT_MS = 15000;
+
+let refreshPromise: Promise<void> | null = null;
+
+async function refreshAccessToken(): Promise<void> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    const response = await fetch(`${BASE_URL}/customer/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!response.ok) {
+      throw new ApiError(response.status, "Session expired. Please log in again.", "http");
     }
-    return error;
-  }
-  return new ApiError(500, fallbackMessage, "network");
-}
+  })();
 
-// POST /customer/auth/register — returns id/name/email/emailVerified/message, NOT a token
-export async function register(
-  userData: RegisterSchemaType,
-  signal?: AbortSignal
-): Promise<{ id: number; name: string; email: string; emailVerified: boolean; message: string }> {
   try {
-    return await apiClient.post("/customer/auth/register", userData, { signal });
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.register);
+    await refreshPromise;
+  } finally {
+    refreshPromise = null;
   }
 }
 
-// POST /customer/auth/login
-export async function login(
-  credentials: LoginSchemaType,
-  signal?: AbortSignal
-): Promise<AuthTokenResponse> {
+interface RequestOptions extends RequestInit {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  skipAuthRetry?: boolean;
+}
+
+async function parseResponseBody(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("Content-Type");
+  const isJson = contentType !== null && contentType.includes("application/json");
+  const rawText = await response.text();
+
+  if (rawText.length === 0) {
+    return null;
+  }
+
+  if (isJson) {
+    try {
+      return JSON.parse(rawText);
+    } catch {
+      throw new ApiError(
+        response.status,
+        "The server returned a malformed response. Please try again.",
+        "parse"
+      );
+    }
+  }
+
+  return rawText;
+}
+
+async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
+  const {
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    signal: externalSignal,
+    skipAuthRetry,
+    ...init
+  } = options;
+
+  const url = `${BASE_URL}${endpoint}`;
+
+  const headers = new Headers(init.headers);
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+
+  const onExternalAbort = () => timeoutController.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      timeoutController.abort();
+    } else {
+      externalSignal.addEventListener("abort", onExternalAbort);
+    }
+  }
+
+  const config: RequestInit = {
+    ...init,
+    headers,
+    credentials: "include",
+    signal: timeoutController.signal,
+  };
+
   try {
-    return await apiClient.post<AuthTokenResponse>("/customer/auth/login", credentials, { signal });
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.login);
+    let response: Response;
+    try {
+      response = await fetch(url, config);
+    } catch (fetchError) {
+      if (fetchError instanceof DOMException && fetchError.name === "AbortError") {
+        if (externalSignal?.aborted) {
+          throw new ApiError(0, "Request was cancelled.", "abort");
+        }
+        throw new ApiError(0, "The request timed out. Please try again.", "network");
+      }
+      throw new ApiError(0, "Unable to reach the server. Check your connection.", "network");
+    }
+
+    if (response.status === 204) {
+      return {} as T;
+    }
+
+    if (
+      response.status === 401 &&
+      !skipAuthRetry &&
+      endpoint !== "/customer/auth/refresh" &&
+      endpoint !== "/auth/refresh"
+    ) {
+      try {
+        await refreshAccessToken();
+      } catch {
+        throw new ApiError(401, "Your session has expired. Please log in again.", "http");
+      }
+      return request<T>(endpoint, { ...options, skipAuthRetry: true });
+    }
+
+    const responseData = await parseResponseBody(response);
+
+    if (!response.ok) {
+      const errorData = responseData as ApiErrorResponse | null;
+      let errorMessage = "An unexpected error occurred. Please try again.";
+
+      if (errorData && typeof errorData.detail === "string") {
+        errorMessage = errorData.detail;
+      } else if (errorData && Array.isArray(errorData.detail)) {
+        errorMessage = errorData.detail.map((err) => `${err.loc.join(".")}: ${err.msg}`).join(", ");
+      } else if (errorData && errorData.message) {
+        errorMessage = errorData.message;
+      }
+
+      throw new ApiError(response.status, errorMessage, "http", errorData?.detail ?? null);
+    }
+
+    return responseData as T;
+  } finally {
+    clearTimeout(timeoutId);
+    if (externalSignal) {
+      externalSignal.removeEventListener("abort", onExternalAbort);
+    }
   }
 }
 
-// POST /customer/auth/refresh
-export async function refreshToken(
-  refreshToken: string,
-  signal?: AbortSignal
-): Promise<AuthTokenResponse> {
-  try {
-    return await apiClient.post<AuthTokenResponse>(
-      "/customer/auth/refresh",
-      { refresh_token: refreshToken },
-      { signal, skipAuthRetry: true }
-    );
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.refresh);
-  }
-}
-
-// POST /customer/auth/logout
-export async function logout(
-  refreshToken: string,
-  signal?: AbortSignal
-): Promise<{ message: string }> {
-  try {
-    return await apiClient.post(
-      "/customer/auth/logout",
-      { refresh_token: refreshToken },
-      { signal }
-    );
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.logout);
-  }
-}
-
-// POST /customer/auth/verify-email
-export async function verifyEmail(
-  token: string,
-  signal?: AbortSignal
-): Promise<{ message: string }> {
-  try {
-    return await apiClient.post("/customer/auth/verify-email", { token }, { signal });
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.verifyEmail);
-  }
-}
-
-// POST /customer/auth/resend-verification
-export async function resendVerification(
-  email: string,
-  signal?: AbortSignal
-): Promise<{ message: string }> {
-  try {
-    return await apiClient.post("/customer/auth/resend-verification", { email }, { signal });
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.resendVerification);
-  }
-}
-
-// POST /customer/auth/forgot-password
-export async function forgotPassword(
-  data: ForgotPasswordSchemaType,
-  signal?: AbortSignal
-): Promise<{ message: string }> {
-  try {
-    return await apiClient.post("/customer/auth/forgot-password", data, { signal });
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.forgotPassword);
-  }
-}
-
-// POST /customer/auth/reset-password
-export async function resetPassword(
-  data: ResetPasswordSchemaType,
-  signal?: AbortSignal
-): Promise<{ message: string }> {
-  try {
-    return await apiClient.post("/customer/auth/reset-password", data, { signal });
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.resetPassword);
-  }
-}
+export const apiClient = {
+  get: <T>(endpoint: string, options?: RequestOptions): Promise<T> =>
+    request<T>(endpoint, { ...options, method: "GET" }),
+  post: <T>(endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> =>
+    request<T>(endpoint, {
+      ...options,
+      method: "POST",
+      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
+    }),
+  put: <T>(endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> =>
+    request<T>(endpoint, {
+      ...options,
+      method: "PUT",
+      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
+    }),
+  patch: <T>(endpoint: string, body?: unknown, options?: RequestOptions): Promise<T> =>
+    request<T>(endpoint, {
+      ...options,
+      method: "PATCH",
+      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
+    }),
+  delete: <T>(endpoint: string, options?: RequestOptions): Promise<T> =>
+    request<T>(endpoint, { ...options, method: "DELETE" }),
+};
 ````
 
 ## File: frontend/lib/api/users.ts
@@ -8128,6 +8315,81 @@ export async function deleteAddress(addressId: number, signal?: AbortSignal): Pr
     throw toUserFacingError(error, FALLBACK_MESSAGES.deleteAddress);
   }
 }
+````
+
+## File: frontend/lib/stores/authStore.ts
+````typescript
+import { create } from "zustand";
+import * as authApi from "@/lib/api/auth";
+import { CustomerProfile } from "@/types/user";
+import { LoginSchemaType, RegisterSchemaType } from "@/lib/validation/auth";
+
+interface AuthState {
+  user: CustomerProfile | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  isInitialized: boolean;
+
+  login: (credentials: LoginSchemaType) => Promise<void>;
+  register: (data: RegisterSchemaType) => Promise<void>;
+  logout: () => Promise<void>;
+  fetchCurrentUser: () => Promise<void>;
+  setUser: (user: CustomerProfile) => void;
+  clearAuth: () => void;
+}
+
+export const useAuthStore = create<AuthState>((set) => ({
+  user: null,
+  isAuthenticated: false,
+  isLoading: false,
+  isInitialized: false,
+
+  login: async (credentials: LoginSchemaType) => {
+    set({ isLoading: true });
+    try {
+      await authApi.login(credentials);
+      const user = await authApi.getCurrentUser();
+      set({ user, isAuthenticated: true, isLoading: false, isInitialized: true });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  register: async (data: RegisterSchemaType) => {
+    set({ isLoading: true });
+    try {
+      await authApi.register(data);
+      set({ isLoading: false });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  logout: async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // Ignore failures — clear local state regardless.
+    }
+    set({ user: null, isAuthenticated: false, isInitialized: true });
+  },
+
+  fetchCurrentUser: async () => {
+    set({ isLoading: true });
+    try {
+      const user = await authApi.getCurrentUser();
+      set({ user, isAuthenticated: true, isLoading: false, isInitialized: true });
+    } catch {
+      set({ user: null, isAuthenticated: false, isLoading: false, isInitialized: true });
+    }
+  },
+
+  setUser: (user: CustomerProfile) => set({ user }),
+
+  clearAuth: () => set({ user: null, isAuthenticated: false }),
+}));
 ````
 
 ## File: frontend/types/api.ts
@@ -8415,6 +8677,7 @@ export interface CustomerProfileUpdate {
   "name": "ecommerce-frontend",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -8425,11 +8688,15 @@ export interface CustomerProfileUpdate {
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.5.7",
+    "@tailwindcss/postcss": "^4.3.3",
     "next": "^16.2.12",
     "postcss": "^8.5.23",
     "react": "19.0.0",
     "react-dom": "19.0.0",
+    "react-hook-form": "^7.83.0",
     "sharp": "^0.35.3",
+    "tailwindcss": "^4.3.3",
     "zod": "^3.23.8",
     "zustand": "^5.0.14"
   },
@@ -9042,6 +9309,161 @@ class OrderStatusUpdate(BaseModel):
     status: str = Field(max_length=20)
 ````
 
+## File: frontend/lib/api/auth.ts
+````typescript
+import { apiClient, ApiError } from "./client";
+import { CustomerProfile } from "@/types/user";
+import {
+  LoginSchemaType,
+  RegisterSchemaType,
+  ResetPasswordSchemaType,
+  ForgotPasswordSchemaType,
+} from "@/lib/validation/auth";
+
+const FALLBACK_MESSAGES = {
+  login: "We couldn't sign you in. Please check your credentials and try again.",
+  register: "We couldn't create your account. Please try again.",
+  refresh: "Your session has expired. Please log in again.",
+  logout: "We couldn't log you out. Please try again.",
+  forgotPassword: "We couldn't send the password reset email. Please try again.",
+  resetPassword: "We couldn't reset your password. Please try again.",
+  verifyEmail: "We couldn't verify your email. Please try again.",
+  resendVerification: "We couldn't resend the verification email. Please try again.",
+} as const;
+
+function toUserFacingError(error: unknown, fallbackMessage: string): ApiError {
+  if (error instanceof ApiError) {
+    if (error.errorType === "network" || error.errorType === "parse") {
+      return new ApiError(error.status, fallbackMessage, error.errorType, error.detail);
+    }
+    return error;
+  }
+  return new ApiError(500, fallbackMessage, "network");
+}
+
+// POST /customer/auth/register — returns id/name/email/emailVerified/message, NOT a token
+export async function register(
+  userData: RegisterSchemaType,
+  signal?: AbortSignal
+): Promise<{ id: number; name: string; email: string; emailVerified: boolean; message: string }> {
+  try {
+    return await apiClient.post("/customer/auth/register", userData, { signal });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.register);
+  }
+}
+
+// POST /customer/auth/login
+export async function login(
+  credentials: LoginSchemaType,
+  signal?: AbortSignal
+): Promise<{ message: string }> {
+  try {
+    return await apiClient.post<{ message: string }>("/customer/auth/login", credentials, {
+      signal,
+    });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.login);
+  }
+}
+
+// POST /customer/auth/refresh
+export async function refreshToken(signal?: AbortSignal): Promise<{ message: string }> {
+  try {
+    return await apiClient.post<{ message: string }>(
+      "/customer/auth/refresh",
+      {},
+      { signal, skipAuthRetry: true }
+    );
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.refresh);
+  }
+}
+
+// POST /customer/auth/logout
+export async function logout(signal?: AbortSignal): Promise<{ message: string }> {
+  try {
+    return await apiClient.post("/customer/auth/logout", {}, { signal });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.logout);
+  }
+}
+
+export async function getCurrentUser(signal?: AbortSignal): Promise<CustomerProfile> {
+  try {
+    const response = await apiClient.get<{
+      id: number;
+      name: string;
+      email: string;
+      phone_number: string | null;
+      avatar_url: string | null;
+      email_verified: boolean;
+      created_at: string;
+    }>("/customer/auth/me", { signal });
+
+    return {
+      id: response.id,
+      name: response.name,
+      email: response.email,
+      phoneNumber: response.phone_number,
+      avatarUrl: response.avatar_url,
+      emailVerified: response.email_verified,
+      createdAt: response.created_at,
+    };
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.refresh);
+  }
+}
+
+// POST /customer/auth/verify-email
+export async function verifyEmail(
+  token: string,
+  signal?: AbortSignal
+): Promise<{ message: string }> {
+  try {
+    return await apiClient.post("/customer/auth/verify-email", { token }, { signal });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.verifyEmail);
+  }
+}
+
+// POST /customer/auth/resend-verification
+export async function resendVerification(
+  email: string,
+  signal?: AbortSignal
+): Promise<{ message: string }> {
+  try {
+    return await apiClient.post("/customer/auth/resend-verification", { email }, { signal });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.resendVerification);
+  }
+}
+
+// POST /customer/auth/forgot-password
+export async function forgotPassword(
+  data: ForgotPasswordSchemaType,
+  signal?: AbortSignal
+): Promise<{ message: string }> {
+  try {
+    return await apiClient.post("/customer/auth/forgot-password", data, { signal });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.forgotPassword);
+  }
+}
+
+// POST /customer/auth/reset-password
+export async function resetPassword(
+  data: ResetPasswordSchemaType,
+  signal?: AbortSignal
+): Promise<{ message: string }> {
+  try {
+    return await apiClient.post("/customer/auth/reset-password", data, { signal });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.resetPassword);
+  }
+}
+````
+
 ## File: .gitignore
 ````
 # ---------- Node / Next.js (frontend) ----------
@@ -9429,75 +9851,6 @@ async def remove_coupon(
     return _serialize_cart(cart)
 ````
 
-## File: backend/app/core/auth.py
-````python
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
-from app.database.session import get_db
-from app.models.user import User
-from app.core.jwt import verify_access_token
-
-security = HTTPBearer()
-security_optional = HTTPBearer(auto_error=False)
-
-
-async def _get_current_user_by_token(token: str, db: AsyncSession) -> User:
-    payload = verify_access_token(token)
-
-    user_id = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
-        )
-
-    stmt = (
-        select(User)
-        .options(selectinload(User.role), selectinload(User.customer_profile))
-        .where(User.id == int(user_id))
-    )
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
-
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
-        )
-
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user"
-        )
-
-    return user
-
-
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db)
-) -> User:
-    return await _get_current_user_by_token(credentials.credentials, db)
-
-
-async def get_current_user_optional(
-    credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
-    db: AsyncSession = Depends(get_db),
-) -> User | None:
-    if not credentials:
-        return None
-
-    try:
-        return await _get_current_user_by_token(credentials.credentials, db)
-    except HTTPException:
-        return None
-````
-
 ## File: backend/app/models/order.py
 ````python
 from datetime import datetime
@@ -9871,6 +10224,98 @@ async def make_staff(db):
     return _make_staff
 ````
 
+## File: backend/app/core/auth.py
+````python
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.database.session import get_db
+from app.models.user import User
+from app.core.jwt import verify_access_token
+
+security = HTTPBearer(auto_error=False)
+security_optional = HTTPBearer(auto_error=False)
+
+
+async def _get_current_user_by_token(token: str, db: AsyncSession) -> User:
+    payload = verify_access_token(token)
+
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
+
+    stmt = (
+        select(User)
+        .options(selectinload(User.role), selectinload(User.customer_profile))
+        .where(User.id == int(user_id))
+    )
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user"
+        )
+
+    return user
+
+
+def _extract_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+) -> str | None:
+    # Cookie takes priority (browser session flow), header is the fallback
+    # (useful for tests / non-browser clients / Swagger "Authorize").
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token:
+        return cookie_token
+    if credentials:
+        return credentials.credentials
+    return None
+
+
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    token = _extract_token(request, credentials)
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated"
+        )
+    return await _get_current_user_by_token(token, db)
+
+
+async def get_current_user_optional(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    token = _extract_token(request, credentials)
+    if token is None:
+        return None
+
+    try:
+        return await _get_current_user_by_token(token, db)
+    except HTTPException:
+        return None
+````
+
 ## File: backend/app/models/__init__.py
 ````python
 from .user import User
@@ -9897,6 +10342,7 @@ from .return_request import ReturnRequest
 ## File: backend/app/main.py
 ````python
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.seed import seed_database
 import app.models
@@ -9924,6 +10370,14 @@ from app.api.routes.wishlist import router as wishlist_router
 from app.api.routes.customer_order import router as customer_order_router
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 ROUTERS = [
     (users_router, "Users"),

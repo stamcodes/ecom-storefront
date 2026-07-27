@@ -34,7 +34,12 @@ export async function register(
   signal?: AbortSignal
 ): Promise<{ id: number; name: string; email: string; emailVerified: boolean; message: string }> {
   try {
-    return await apiClient.post("/customer/auth/register", userData, { signal });
+    const payload = {
+      name: `${userData.firstName} ${userData.lastName}`.trim(),
+      email: userData.email,
+      password: userData.password,
+    };
+    return await apiClient.post("/customer/auth/register", payload, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.register);
   }
