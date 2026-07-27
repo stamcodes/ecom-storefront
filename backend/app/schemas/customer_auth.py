@@ -28,6 +28,10 @@ class CustomerToken(BaseModel):
     token_type: str
 
 
+class CustomerAuthResponse(BaseModel):
+    message: str
+
+
 class CustomerRefreshRequest(BaseModel):
     refresh_token: str
 

@@ -1,111 +1,71 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import * as authApi from "@/lib/api/auth";
 import { CustomerProfile } from "@/types/user";
 import { LoginSchemaType, RegisterSchemaType } from "@/lib/validation/auth";
 
 interface AuthState {
-  accessToken: string | null;
-  refreshToken: string | null;
   user: CustomerProfile | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isInitialized: boolean;
 
   login: (credentials: LoginSchemaType) => Promise<void>;
   register: (data: RegisterSchemaType) => Promise<void>;
   logout: () => Promise<void>;
-  refreshAccessToken: () => Promise<string>;
+  fetchCurrentUser: () => Promise<void>;
   setUser: (user: CustomerProfile) => void;
   clearAuth: () => void;
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set, get) => ({
-      accessToken: null,
-      refreshToken: null,
-      user: null,
-      isAuthenticated: false,
-      isLoading: false,
+export const useAuthStore = create<AuthState>((set) => ({
+  user: null,
+  isAuthenticated: false,
+  isLoading: false,
+  isInitialized: false,
 
-      login: async (credentials) => {
-        set({ isLoading: true });
-        try {
-          const token = await authApi.login(credentials);
-          set({
-            accessToken: token.accessToken,
-            refreshToken: token.refreshToken,
-            isAuthenticated: true,
-            isLoading: false,
-          });
-        } catch (error) {
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
-      register: async (data) => {
-        set({ isLoading: true });
-        try {
-          await authApi.register(data);
-          // Backend does NOT return a token on register — email verification required first.
-          // No auto-login here; caller should redirect to a "check your email" screen.
-          set({ isLoading: false });
-        } catch (error) {
-          set({ isLoading: false });
-          throw error;
-        }
-      },
-
-      logout: async () => {
-        const { refreshToken } = get();
-        if (refreshToken) {
-          try {
-            await authApi.logout(refreshToken);
-          } catch {
-            // Ignore failures — clear local state regardless.
-          }
-        }
-        get().clearAuth();
-      },
-
-      refreshAccessToken: async () => {
-        const { refreshToken } = get();
-        if (!refreshToken) {
-          get().clearAuth();
-          throw new Error("No refresh token available");
-        }
-        try {
-          const token = await authApi.refreshToken(refreshToken);
-          set({
-            accessToken: token.accessToken,
-            refreshToken: token.refreshToken, // rotated on backend
-            isAuthenticated: true,
-          });
-          return token.accessToken;
-        } catch (error) {
-          get().clearAuth();
-          throw error;
-        }
-      },
-
-      setUser: (user) => set({ user }),
-
-      clearAuth: () =>
-        set({
-          accessToken: null,
-          refreshToken: null,
-          user: null,
-          isAuthenticated: false,
-        }),
-    }),
-    {
-      name: "auth-storage",
-      partialize: (state) => ({
-        accessToken: state.accessToken,
-        refreshToken: state.refreshToken,
-        isAuthenticated: state.isAuthenticated,
-      }),
+  login: async (credentials: LoginSchemaType) => {
+    set({ isLoading: true });
+    try {
+      await authApi.login(credentials);
+      const user = await authApi.getCurrentUser();
+      set({ user, isAuthenticated: true, isLoading: false, isInitialized: true });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
     }
-  )
-);
+  },
+
+  register: async (data: RegisterSchemaType) => {
+    set({ isLoading: true });
+    try {
+      await authApi.register(data);
+      set({ isLoading: false });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  logout: async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // Ignore failures — clear local state regardless.
+    }
+    set({ user: null, isAuthenticated: false, isInitialized: true });
+  },
+
+  fetchCurrentUser: async () => {
+    set({ isLoading: true });
+    try {
+      const user = await authApi.getCurrentUser();
+      set({ user, isAuthenticated: true, isLoading: false, isInitialized: true });
+    } catch {
+      set({ user: null, isAuthenticated: false, isLoading: false, isInitialized: true });
+    }
+  },
+
+  setUser: (user: CustomerProfile) => set({ user }),
+
+  clearAuth: () => set({ user: null, isAuthenticated: false }),
+}));

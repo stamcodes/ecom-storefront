@@ -47,8 +47,24 @@ async def test_login_success(client, make_customer):
     resp = await client.post("/customer/auth/login", json={"email": "login@example.com", "password": password})
     assert resp.status_code == 200
     body = resp.json()
-    assert "access_token" in body
-    assert body["token_type"] == "bearer"
+    assert body["message"] == "Logged in successfully."
+    set_cookie_header = resp.headers.get("set-cookie", "")
+    assert "access_token=" in set_cookie_header
+    assert "refresh_token=" in set_cookie_header
+    assert "HttpOnly" in set_cookie_header
+
+
+async def test_me_uses_access_cookie(client, make_customer):
+    user, password = await make_customer(email="me-cookie@example.com")
+    login_resp = await client.post(
+        "/customer/auth/login",
+        json={"email": "me-cookie@example.com", "password": password},
+    )
+    assert login_resp.status_code == 200
+
+    me_resp = await client.get("/customer/auth/me")
+    assert me_resp.status_code == 200
+    assert me_resp.json()["email"] == user.email
 
 
 async def test_login_wrong_password(client, make_customer):

@@ -1,5 +1,5 @@
 import { apiClient, ApiError } from "./client";
-import { AuthTokenResponse } from "@/types/api";
+import { CustomerProfile } from "@/types/user";
 import {
   LoginSchemaType,
   RegisterSchemaType,
@@ -44,23 +44,22 @@ export async function register(
 export async function login(
   credentials: LoginSchemaType,
   signal?: AbortSignal
-): Promise<AuthTokenResponse> {
+): Promise<{ message: string }> {
   try {
-    return await apiClient.post<AuthTokenResponse>("/customer/auth/login", credentials, { signal });
+    return await apiClient.post<{ message: string }>("/customer/auth/login", credentials, {
+      signal,
+    });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.login);
   }
 }
 
 // POST /customer/auth/refresh
-export async function refreshToken(
-  refreshToken: string,
-  signal?: AbortSignal
-): Promise<AuthTokenResponse> {
+export async function refreshToken(signal?: AbortSignal): Promise<{ message: string }> {
   try {
-    return await apiClient.post<AuthTokenResponse>(
+    return await apiClient.post<{ message: string }>(
       "/customer/auth/refresh",
-      { refresh_token: refreshToken },
+      {},
       { signal, skipAuthRetry: true }
     );
   } catch (error) {
@@ -69,18 +68,37 @@ export async function refreshToken(
 }
 
 // POST /customer/auth/logout
-export async function logout(
-  refreshToken: string,
-  signal?: AbortSignal
-): Promise<{ message: string }> {
+export async function logout(signal?: AbortSignal): Promise<{ message: string }> {
   try {
-    return await apiClient.post(
-      "/customer/auth/logout",
-      { refresh_token: refreshToken },
-      { signal }
-    );
+    return await apiClient.post("/customer/auth/logout", {}, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.logout);
+  }
+}
+
+export async function getCurrentUser(signal?: AbortSignal): Promise<CustomerProfile> {
+  try {
+    const response = await apiClient.get<{
+      id: number;
+      name: string;
+      email: string;
+      phone_number: string | null;
+      avatar_url: string | null;
+      email_verified: boolean;
+      created_at: string;
+    }>("/customer/auth/me", { signal });
+
+    return {
+      id: response.id,
+      name: response.name,
+      email: response.email,
+      phoneNumber: response.phone_number,
+      avatarUrl: response.avatar_url,
+      emailVerified: response.email_verified,
+      createdAt: response.created_at,
+    };
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.refresh);
   }
 }
 

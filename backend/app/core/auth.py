@@ -1,4 +1,4 @@
-﻿from fastapi import Depends, HTTPException, status
+﻿from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +8,7 @@ from app.database.session import get_db
 from app.models.user import User
 from app.core.jwt import verify_access_token
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 security_optional = HTTPBearer(auto_error=False)
 
 
@@ -45,21 +45,44 @@ async def _get_current_user_by_token(token: str, db: AsyncSession) -> User:
     return user
 
 
+def _extract_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None,
+) -> str | None:
+    # Cookie takes priority (browser session flow), header is the fallback
+    # (useful for tests / non-browser clients / Swagger "Authorize").
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token:
+        return cookie_token
+    if credentials:
+        return credentials.credentials
+    return None
+
+
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
-    return await _get_current_user_by_token(credentials.credentials, db)
+    token = _extract_token(request, credentials)
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated"
+        )
+    return await _get_current_user_by_token(token, db)
 
 
 async def get_current_user_optional(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
-    if not credentials:
+    token = _extract_token(request, credentials)
+    if token is None:
         return None
 
     try:
-        return await _get_current_user_by_token(credentials.credentials, db)
+        return await _get_current_user_by_token(token, db)
     except HTTPException:
         return None

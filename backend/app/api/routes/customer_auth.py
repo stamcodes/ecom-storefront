@@ -1,7 +1,7 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +13,7 @@ from app.schemas.customer_auth import (
     CustomerRegisterRequest,
     CustomerRegisterResponse,
     CustomerLoginRequest,
-    CustomerToken,
+    CustomerAuthResponse,
     CustomerRefreshRequest,
     CustomerVerifyEmailRequest,
     CustomerResendVerificationRequest,
@@ -24,22 +24,53 @@ from app.schemas.customer_auth import (
 from app.core.security import hash_password, verify_password
 from app.core.jwt import create_access_token, create_refresh_token
 from app.core.email import send_verification_email, send_password_reset_email
+from app.core.auth import get_current_user
+from app.schemas.customer_profile import CustomerProfileOut
 
 router = APIRouter(prefix="/customer/auth", tags=["Customer Auth"])
 
 CUSTOMER_ROLE_ID = 4
 VERIFICATION_TOKEN_EXPIRE_HOURS = 24
 RESET_TOKEN_EXPIRE_HOURS = 1
+ACCESS_COOKIE_NAME = "access_token"
+REFRESH_COOKIE_NAME = "refresh_token"
+COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
 
 
-def _issue_tokens(user: User) -> CustomerToken:
+def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    response.set_cookie(
+        key=ACCESS_COOKIE_NAME,
+        value=access_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=60 * 60 * 24,
+        path="/",
+    )
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=COOKIE_MAX_AGE_SECONDS,
+        path="/",
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(ACCESS_COOKIE_NAME, path="/")
+    response.delete_cookie(REFRESH_COOKIE_NAME, path="/")
+
+
+def _issue_tokens(user: User) -> tuple[str, str]:
     access_token = create_access_token(
         {"sub": str(user.id), "email": user.email, "role_id": user.role_id}
     )
     refresh_token, refresh_expires_at = create_refresh_token()
     user.refresh_token = refresh_token
     user.refresh_token_expires_at = refresh_expires_at
-    return CustomerToken(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
+    return access_token, refresh_token
 
 
 @router.post("/register", response_model=CustomerRegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -88,8 +119,12 @@ async def customer_register(payload: CustomerRegisterRequest, db: AsyncSession =
     )
 
 
-@router.post("/login", response_model=CustomerToken)
-async def customer_login(payload: CustomerLoginRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/login", response_model=CustomerAuthResponse)
+async def customer_login(
+    payload: CustomerLoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
     stmt = select(User).where(User.email == payload.email)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
@@ -103,15 +138,24 @@ async def customer_login(payload: CustomerLoginRequest, db: AsyncSession = Depen
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
 
-    token = _issue_tokens(user)
+    access_token, refresh_token = _issue_tokens(user)
+    _set_auth_cookies(response, access_token, refresh_token)
     await db.commit()
 
-    return token
+    return CustomerAuthResponse(message="Logged in successfully.")
 
 
-@router.post("/refresh", response_model=CustomerToken)
-async def customer_refresh(payload: CustomerRefreshRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.refresh_token == payload.refresh_token)
+@router.post("/refresh", response_model=CustomerAuthResponse)
+async def customer_refresh(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    stmt = select(User).where(User.refresh_token == refresh_token)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
@@ -124,15 +168,21 @@ async def customer_refresh(payload: CustomerRefreshRequest, db: AsyncSession = D
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
 
-    token = _issue_tokens(user)  # rotates refresh token
+    access_token, refresh_token = _issue_tokens(user)  # rotates refresh token
+    _set_auth_cookies(response, access_token, refresh_token)
     await db.commit()
 
-    return token
+    return CustomerAuthResponse(message="Session refreshed successfully.")
 
 
 @router.post("/logout", response_model=MsgResponse)
-async def customer_logout(payload: CustomerRefreshRequest, db: AsyncSession = Depends(get_db)):
-    stmt = select(User).where(User.refresh_token == payload.refresh_token)
+async def customer_logout(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    stmt = select(User).where(User.refresh_token == refresh_token)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
 
@@ -141,7 +191,21 @@ async def customer_logout(payload: CustomerRefreshRequest, db: AsyncSession = De
         user.refresh_token_expires_at = None
         await db.commit()
 
+    _clear_auth_cookies(response)
     return MsgResponse(message="Logged out successfully.")
+
+
+@router.get("/me", response_model=CustomerProfileOut)
+async def customer_me(current_user: User = Depends(get_current_user)):
+    return CustomerProfileOut(
+        id=current_user.id,
+        name=current_user.name,
+        email=current_user.email,
+        phone_number=current_user.phone_number,
+        avatar_url=current_user.avatar_url,
+        email_verified=current_user.email_verified,
+        created_at=current_user.created_at,
+    )
 
 
 @router.post("/verify-email", response_model=MsgResponse)

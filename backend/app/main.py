@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.seed import seed_database
 import app.models
@@ -26,6 +27,14 @@ from app.api.routes.wishlist import router as wishlist_router
 from app.api.routes.customer_order import router as customer_order_router
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 ROUTERS = [
     (users_router, "Users"),

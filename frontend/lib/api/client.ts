@@ -24,15 +24,15 @@ export class ApiError extends Error {
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const DEFAULT_TIMEOUT_MS = 15000;
 
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<void> | null = null;
 
-async function refreshAccessToken(): Promise<string> {
+async function refreshAccessToken(): Promise<void> {
   if (refreshPromise) {
     return refreshPromise;
   }
 
   refreshPromise = (async () => {
-    const response = await fetch(`${BASE_URL}/auth/refresh`, {
+    const response = await fetch(`${BASE_URL}/customer/auth/refresh`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -41,19 +41,10 @@ async function refreshAccessToken(): Promise<string> {
     if (!response.ok) {
       throw new ApiError(response.status, "Session expired. Please log in again.", "http");
     }
-
-    const data = (await response.json()) as { data?: { accessToken?: string } };
-    const accessToken = data?.data?.accessToken;
-
-    if (!accessToken) {
-      throw new ApiError(500, "Session refresh failed. Please log in again.", "parse");
-    }
-
-    return accessToken;
   })();
 
   try {
-    return await refreshPromise;
+    await refreshPromise;
   } finally {
     refreshPromise = null;
   }
@@ -141,7 +132,12 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
       return {} as T;
     }
 
-    if (response.status === 401 && !skipAuthRetry && endpoint !== "/auth/refresh") {
+    if (
+      response.status === 401 &&
+      !skipAuthRetry &&
+      endpoint !== "/customer/auth/refresh" &&
+      endpoint !== "/auth/refresh"
+    ) {
       try {
         await refreshAccessToken();
       } catch {
