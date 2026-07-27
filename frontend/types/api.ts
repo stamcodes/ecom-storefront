@@ -1,16 +1,5 @@
-import { User, UserProfile } from "./user";
-import { Product } from "./product";
-import { Order } from "./order";
-
-export interface ApiResponse<T> {
-  data: T;
-  message?: string;
-  status: number;
-}
-
 export interface ApiErrorResponse {
   detail: string | Array<{ loc: (string | number)[]; msg: string; type: string }>;
-  message?: string;
 }
 
 export interface PaginatedResponse<T> {
@@ -21,10 +10,11 @@ export interface PaginatedResponse<T> {
   pages: number;
 }
 
-export interface AuthResponseData {
+// Mirrors: app/schemas/customer_auth.py CustomerToken
+export interface AuthTokenResponse {
   accessToken: string;
   refreshToken: string;
-  user: User;
+  tokenType: string;
 }
 
 export interface ProductQueryParams {
@@ -42,22 +32,4 @@ export interface OrderQueryParams {
   page?: number;
   size?: number;
   status?: string;
-}
-
-export interface CartItemResponse {
-  id: string;
-  productId: string;
-  product: Product;
-  quantity: number;
-  priceAtAddition: number;
-}
-
-export interface CartResponseData {
-  id: string;
-  userId: string;
-  items: CartItemResponse[];
-  subtotal: number;
-  tax: number;
-  shipping: number;
-  total: number;
 }

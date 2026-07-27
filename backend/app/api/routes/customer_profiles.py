@@ -9,7 +9,7 @@ from app.schemas.customer_profile import CustomerProfileOut, CustomerProfileUpda
 from app.schemas.address import AddressCreate, AddressUpdate, AddressOut
 from app.core.auth import get_current_user
 
-router = APIRouter()
+router = APIRouter(prefix="/customer/profile", tags=["Customer Profile"])
 
 
 @router.get("/me", response_model=CustomerProfileOut)

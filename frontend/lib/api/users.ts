@@ -1,15 +1,16 @@
 import { apiClient, ApiError } from "./client";
-import { ApiResponse } from "@/types/api";
-import { UserProfile, UserAddress } from "@/types/user";
-import { AddressSchemaType } from "@/lib/validation/address";
+import { CustomerProfile, CustomerProfileUpdate } from "@/types/user";
+import { Address, AddressCreate, AddressUpdate } from "@/types/address";
+
+const BASE = "/customer/profile";
 
 const FALLBACK_MESSAGES = {
-  getProfile: "We couldn't load your profile right now. Please try again.",
-  updateProfile: "We couldn't save your profile changes. Please try again.",
-  getAddresses: "We couldn't load your addresses right now. Please try again.",
-  createAddress: "We couldn't save that address. Please try again.",
+  getProfile: "We couldn't load your profile. Please try again.",
+  updateProfile: "We couldn't update your profile. Please try again.",
+  listAddresses: "We couldn't load your addresses. Please try again.",
+  createAddress: "We couldn't add that address. Please try again.",
   updateAddress: "We couldn't update that address. Please try again.",
-  deleteAddress: "We couldn't remove that address. Please try again.",
+  deleteAddress: "We couldn't delete that address. Please try again.",
 } as const;
 
 function toUserFacingError(error: unknown, fallbackMessage: string): ApiError {
@@ -22,72 +23,62 @@ function toUserFacingError(error: unknown, fallbackMessage: string): ApiError {
   return new ApiError(500, fallbackMessage, "network");
 }
 
-export async function getUserProfile(signal?: AbortSignal): Promise<ApiResponse<UserProfile>> {
+// GET /customer/profile/me
+export async function getProfile(signal?: AbortSignal): Promise<CustomerProfile> {
   try {
-    return await apiClient.get<ApiResponse<UserProfile>>("/users/profile", { signal });
+    return await apiClient.get<CustomerProfile>(`${BASE}/me`, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.getProfile);
   }
 }
 
-export async function updateUserProfile(
-  profileData: Partial<UserProfile>,
+// PUT /customer/profile/me
+export async function updateProfile(
+  data: CustomerProfileUpdate,
   signal?: AbortSignal
-): Promise<ApiResponse<UserProfile>> {
+): Promise<CustomerProfile> {
   try {
-    return await apiClient.patch<ApiResponse<UserProfile>>("/users/profile", profileData, {
-      signal,
-    });
+    return await apiClient.put<CustomerProfile>(`${BASE}/me`, data, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.updateProfile);
   }
 }
 
-export async function getUserAddresses(signal?: AbortSignal): Promise<ApiResponse<UserAddress[]>> {
+// GET /customer/profile/addresses
+export async function listAddresses(signal?: AbortSignal): Promise<Address[]> {
   try {
-    return await apiClient.get<ApiResponse<UserAddress[]>>("/users/addresses", { signal });
+    return await apiClient.get<Address[]>(`${BASE}/addresses`, { signal });
   } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.getAddresses);
+    throw toUserFacingError(error, FALLBACK_MESSAGES.listAddresses);
   }
 }
 
-export async function createUserAddress(
-  addressData: AddressSchemaType,
-  signal?: AbortSignal
-): Promise<ApiResponse<UserAddress>> {
+// POST /customer/profile/addresses
+export async function createAddress(data: AddressCreate, signal?: AbortSignal): Promise<Address> {
   try {
-    return await apiClient.post<ApiResponse<UserAddress>>("/users/addresses", addressData, {
-      signal,
-    });
+    return await apiClient.post<Address>(`${BASE}/addresses`, data, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.createAddress);
   }
 }
 
-export async function updateUserAddress(
-  addressId: string,
-  addressData: Partial<AddressSchemaType>,
+// PUT /customer/profile/addresses/{addressId}
+export async function updateAddress(
+  addressId: number,
+  data: AddressUpdate,
   signal?: AbortSignal
-): Promise<ApiResponse<UserAddress>> {
+): Promise<Address> {
   try {
-    return await apiClient.put<ApiResponse<UserAddress>>(
-      `/users/addresses/${addressId}`,
-      addressData,
-      { signal }
-    );
+    return await apiClient.put<Address>(`${BASE}/addresses/${addressId}`, data, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.updateAddress);
   }
 }
 
-export async function deleteUserAddress(
-  addressId: string,
-  signal?: AbortSignal
-): Promise<ApiResponse<null>> {
+// DELETE /customer/profile/addresses/{addressId} — 204 No Content
+export async function deleteAddress(addressId: number, signal?: AbortSignal): Promise<void> {
   try {
-    return await apiClient.delete<ApiResponse<null>>(`/users/addresses/${addressId}`, {
-      signal,
-    });
+    await apiClient.delete(`${BASE}/addresses/${addressId}`, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.deleteAddress);
   }

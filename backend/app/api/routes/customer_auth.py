@@ -14,6 +14,7 @@ from app.schemas.customer_auth import (
     CustomerRegisterResponse,
     CustomerLoginRequest,
     CustomerToken,
+    CustomerRefreshRequest,
     CustomerVerifyEmailRequest,
     CustomerResendVerificationRequest,
     CustomerForgotPasswordRequest,
@@ -21,7 +22,7 @@ from app.schemas.customer_auth import (
     MsgResponse,
 )
 from app.core.security import hash_password, verify_password
-from app.core.jwt import create_access_token
+from app.core.jwt import create_access_token, create_refresh_token
 from app.core.email import send_verification_email, send_password_reset_email
 
 router = APIRouter(prefix="/customer/auth", tags=["Customer Auth"])
@@ -29,6 +30,16 @@ router = APIRouter(prefix="/customer/auth", tags=["Customer Auth"])
 CUSTOMER_ROLE_ID = 4
 VERIFICATION_TOKEN_EXPIRE_HOURS = 24
 RESET_TOKEN_EXPIRE_HOURS = 1
+
+
+def _issue_tokens(user: User) -> CustomerToken:
+    access_token = create_access_token(
+        {"sub": str(user.id), "email": user.email, "role_id": user.role_id}
+    )
+    refresh_token, refresh_expires_at = create_refresh_token()
+    user.refresh_token = refresh_token
+    user.refresh_token_expires_at = refresh_expires_at
+    return CustomerToken(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
 
 
 @router.post("/register", response_model=CustomerRegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -92,11 +103,45 @@ async def customer_login(payload: CustomerLoginRequest, db: AsyncSession = Depen
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
 
-    access_token = create_access_token(
-        {"sub": str(user.id), "email": user.email, "role_id": user.role_id}
-    )
+    token = _issue_tokens(user)
+    await db.commit()
 
-    return CustomerToken(access_token=access_token, token_type="bearer")
+    return token
+
+
+@router.post("/refresh", response_model=CustomerToken)
+async def customer_refresh(payload: CustomerRefreshRequest, db: AsyncSession = Depends(get_db)):
+    stmt = select(User).where(User.refresh_token == payload.refresh_token)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+
+    if not user.refresh_token_expires_at or user.refresh_token_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
+
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
+
+    token = _issue_tokens(user)  # rotates refresh token
+    await db.commit()
+
+    return token
+
+
+@router.post("/logout", response_model=MsgResponse)
+async def customer_logout(payload: CustomerRefreshRequest, db: AsyncSession = Depends(get_db)):
+    stmt = select(User).where(User.refresh_token == payload.refresh_token)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if user:
+        user.refresh_token = None
+        user.refresh_token_expires_at = None
+        await db.commit()
+
+    return MsgResponse(message="Logged out successfully.")
 
 
 @router.post("/verify-email", response_model=MsgResponse)

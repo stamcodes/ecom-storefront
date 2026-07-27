@@ -24,7 +24,12 @@ class CustomerLoginRequest(BaseModel):
 
 class CustomerToken(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str
+
+
+class CustomerRefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class CustomerVerifyEmailRequest(BaseModel):

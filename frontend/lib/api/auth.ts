@@ -1,5 +1,5 @@
 import { apiClient, ApiError } from "./client";
-import { ApiResponse, AuthResponseData } from "@/types/api";
+import { AuthTokenResponse } from "@/types/api";
 import {
   LoginSchemaType,
   RegisterSchemaType,
@@ -15,6 +15,7 @@ const FALLBACK_MESSAGES = {
   forgotPassword: "We couldn't send the password reset email. Please try again.",
   resetPassword: "We couldn't reset your password. Please try again.",
   verifyEmail: "We couldn't verify your email. Please try again.",
+  resendVerification: "We couldn't resend the verification email. Please try again.",
 } as const;
 
 function toUserFacingError(error: unknown, fallbackMessage: string): ApiError {
@@ -27,79 +28,106 @@ function toUserFacingError(error: unknown, fallbackMessage: string): ApiError {
   return new ApiError(500, fallbackMessage, "network");
 }
 
-export async function login(
-  credentials: LoginSchemaType,
-  signal?: AbortSignal
-): Promise<ApiResponse<AuthResponseData>> {
-  try {
-    return await apiClient.post<ApiResponse<AuthResponseData>>("/auth/login", credentials, {
-      signal,
-    });
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.login);
-  }
-}
-
+// POST /customer/auth/register — returns id/name/email/emailVerified/message, NOT a token
 export async function register(
   userData: RegisterSchemaType,
   signal?: AbortSignal
-): Promise<ApiResponse<AuthResponseData>> {
+): Promise<{ id: number; name: string; email: string; emailVerified: boolean; message: string }> {
   try {
-    return await apiClient.post<ApiResponse<AuthResponseData>>("/auth/register", userData, {
-      signal,
-    });
+    return await apiClient.post("/customer/auth/register", userData, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.register);
   }
 }
 
-export async function refreshToken(
+// POST /customer/auth/login
+export async function login(
+  credentials: LoginSchemaType,
   signal?: AbortSignal
-): Promise<ApiResponse<{ accessToken: string }>> {
+): Promise<AuthTokenResponse> {
   try {
-    return await apiClient.post<ApiResponse<{ accessToken: string }>>("/auth/refresh", undefined, {
-      signal,
-      skipAuthRetry: true,
-    });
+    return await apiClient.post<AuthTokenResponse>("/customer/auth/login", credentials, { signal });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.login);
+  }
+}
+
+// POST /customer/auth/refresh
+export async function refreshToken(
+  refreshToken: string,
+  signal?: AbortSignal
+): Promise<AuthTokenResponse> {
+  try {
+    return await apiClient.post<AuthTokenResponse>(
+      "/customer/auth/refresh",
+      { refresh_token: refreshToken },
+      { signal, skipAuthRetry: true }
+    );
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.refresh);
   }
 }
 
-export async function logout(signal?: AbortSignal): Promise<ApiResponse<null>> {
+// POST /customer/auth/logout
+export async function logout(
+  refreshToken: string,
+  signal?: AbortSignal
+): Promise<{ message: string }> {
   try {
-    return await apiClient.post<ApiResponse<null>>("/auth/logout", undefined, { signal });
+    return await apiClient.post(
+      "/customer/auth/logout",
+      { refresh_token: refreshToken },
+      { signal }
+    );
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.logout);
   }
 }
 
+// POST /customer/auth/verify-email
+export async function verifyEmail(
+  token: string,
+  signal?: AbortSignal
+): Promise<{ message: string }> {
+  try {
+    return await apiClient.post("/customer/auth/verify-email", { token }, { signal });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.verifyEmail);
+  }
+}
+
+// POST /customer/auth/resend-verification
+export async function resendVerification(
+  email: string,
+  signal?: AbortSignal
+): Promise<{ message: string }> {
+  try {
+    return await apiClient.post("/customer/auth/resend-verification", { email }, { signal });
+  } catch (error) {
+    throw toUserFacingError(error, FALLBACK_MESSAGES.resendVerification);
+  }
+}
+
+// POST /customer/auth/forgot-password
 export async function forgotPassword(
   data: ForgotPasswordSchemaType,
   signal?: AbortSignal
-): Promise<ApiResponse<null>> {
+): Promise<{ message: string }> {
   try {
-    return await apiClient.post<ApiResponse<null>>("/auth/forgot-password", data, { signal });
+    return await apiClient.post("/customer/auth/forgot-password", data, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.forgotPassword);
   }
 }
 
+// POST /customer/auth/reset-password
 export async function resetPassword(
   data: ResetPasswordSchemaType,
   signal?: AbortSignal
-): Promise<ApiResponse<null>> {
+): Promise<{ message: string }> {
   try {
-    return await apiClient.post<ApiResponse<null>>("/auth/reset-password", data, { signal });
+    return await apiClient.post("/customer/auth/reset-password", data, { signal });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.resetPassword);
-  }
-}
-
-export async function verifyEmail(token: string, signal?: AbortSignal): Promise<ApiResponse<null>> {
-  try {
-    return await apiClient.post<ApiResponse<null>>("/auth/verify-email", { token }, { signal });
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.verifyEmail);
   }
 }
