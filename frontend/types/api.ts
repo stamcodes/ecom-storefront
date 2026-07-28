@@ -33,3 +33,13 @@ export interface OrderQueryParams {
   size?: number;
   status?: string;
 }
+
+export interface ProductQueryParams {
+  limit?: number;
+  page?: number;
+  page_size?: number;
+  search?: string;
+  category_id?: string | number;
+  category_slug?: string;
+  // keep your other existing fields here
+}

@@ -1,142 +1,130 @@
-"use client";
-
-import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useAuthStore } from "@/lib/stores/authStore";
+import { getProducts } from "@/lib/api/products";
+import { getCategories } from "@/lib/api/categories";
+import { ProductCard } from "@/components/features/product/productCard";
 
-export default function HomePage() {
-  const { user, isAuthenticated, logout, fetchCurrentUser, isInitialized } = useAuthStore();
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
+interface Product {
+  id: string | number;
+  name: string;
+  slug?: string;
+  price: number;
+  image_url?: string;
+  category_name?: string;
+}
 
-  useEffect(() => {
-    if (!isInitialized) {
-      fetchCurrentUser();
-    }
-  }, [isInitialized, fetchCurrentUser]);
+interface Category {
+  id: string | number;
+  name: string;
+  slug?: string;
+}
 
-  const handleLogout = async () => {
-    setIsLoggingOut(true);
-    try {
-      await logout();
-    } catch (error) {
-      console.error("Logout error:", error);
-    } finally {
-      if (typeof window !== "undefined") {
-        localStorage.clear();
-        sessionStorage.clear();
-        window.location.href = "/login";
-      }
-    }
-  };
+export default async function HomePage() {
+  let products: Product[] = [];
+  let categories: Category[] = [];
+
+  try {
+    const [productsRes, categoriesRes] = await Promise.all([
+      getProducts({ limit: 12 }),
+      getCategories(),
+    ]);
+    products = productsRes?.items || productsRes || [];
+    categories = categoriesRes || [];
+  } catch (error) {
+    console.error("Failed to load homepage data:", error);
+  }
+
+  const featuredProducts = products.slice(0, 3);
+  const recentProducts = products.slice(3, 11);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Header / Navbar */}
-      <header className="sticky top-0 z-10 bg-white border-b border-gray-200 shadow-sm">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <Link href="/" className="text-xl font-bold text-gray-900 tracking-tight">
-            🛍️ StoreFront
-          </Link>
-
-          <nav className="flex items-center gap-4">
-            <Link href="/products" className="text-sm font-medium text-gray-700 hover:text-gray-900 transition">
-              Products
-            </Link>
-            <Link href="/categories" className="text-sm font-medium text-gray-700 hover:text-gray-900 transition">
-              Categories
-            </Link>
-            <Link href="/cart" className="text-sm font-medium text-gray-700 hover:text-gray-900 transition">
-              Cart
-            </Link>
-
-            {isAuthenticated && user ? (
-              <div className="flex items-center gap-3 pl-4 border-l border-gray-200">
-                <Link href="/account" className="text-sm font-medium text-gray-900 hover:underline">
-                  {user.name || user.email}
-                </Link>
-                <button
-                  onClick={handleLogout}
-                  disabled={isLoggingOut}
-                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 transition focus:outline-none disabled:opacity-60"
-                >
-                  {isLoggingOut ? "Logging out..." : "Logout"}
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 pl-4 border-l border-gray-200">
-                <Link
-                  href="/login"
-                  className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
-                >
-                  Sign In
-                </Link>
-                <Link
-                  href="/register"
-                  className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800 transition"
-                >
-                  Register
-                </Link>
-              </div>
-            )}
-          </nav>
-        </div>
-      </header>
-
-      {/* Main Hero Content */}
-      <main className="flex-1 mx-auto max-w-4xl px-4 py-16 text-center flex flex-col items-center justify-center">
-        <div className="rounded-2xl bg-white p-8 sm:p-12 shadow-sm border border-gray-200 w-full space-y-6">
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 tracking-tight">
-            Welcome to E-Commerce Storefront
+    <div className="space-y-12">
+      {/* Hero Section */}
+      <section className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-8 md:p-12 shadow-xl">
+        <div className="max-w-3xl space-y-4">
+          <span className="text-xs font-semibold tracking-wider text-indigo-400 uppercase">
+            Featured Collection
+          </span>
+          <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight">
+            Discover Premium Products for Your Modern Lifestyle
           </h1>
-          <p className="text-base text-gray-600 max-w-xl mx-auto">
-            Discover curated items, seamless checkout, and account management built with Next.js and FastAPI.
+          <p className="text-slate-300 text-lg">
+            Explore our curated catalog of high-quality goods, exclusive deals, and fast delivery
+            directly to your doorstep.
           </p>
-
-          {/* User Session Banner */}
-          {isAuthenticated && user && (
-            <div className="my-6 rounded-xl bg-blue-50 border border-blue-100 p-4 text-left sm:flex sm:items-center sm:justify-between gap-4">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-blue-600">Logged In Session</p>
-                <p className="text-sm font-semibold text-gray-900 mt-0.5">{user.name || "Customer"}</p>
-                <p className="text-xs text-gray-600">{user.email}</p>
-              </div>
-              <div className="mt-3 sm:mt-0 flex gap-2">
-                <Link
-                  href="/account"
-                  className="inline-flex items-center rounded-lg border border-blue-200 bg-white px-3.5 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50 transition"
-                >
-                  Account Dashboard
-                </Link>
-                <button
-                  onClick={handleLogout}
-                  disabled={isLoggingOut}
-                  className="inline-flex items-center rounded-lg bg-red-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-red-700 transition disabled:opacity-60"
-                >
-                  {isLoggingOut ? "Logging out..." : "Sign Out"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Action CTAs */}
-          <div className="flex flex-wrap justify-center gap-4 pt-2">
+          <div className="pt-2">
             <Link
               href="/products"
-              className="rounded-lg bg-gray-900 px-6 py-3 text-sm font-semibold text-white shadow hover:bg-gray-800 transition"
+              className="inline-block bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-6 py-3 rounded-lg transition-colors shadow-md"
             >
-              Browse Products
+              Shop All Products
             </Link>
-            {!isAuthenticated && (
-              <Link
-                href="/login"
-                className="rounded-lg border border-gray-300 bg-white px-6 py-3 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition"
-              >
-                Sign In to Account
-              </Link>
-            )}
           </div>
         </div>
-      </main>
+      </section>
+
+      {/* Featured Items Grid */}
+      {featuredProducts.length > 0 && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-2xl font-bold tracking-tight text-slate-900">Featured Items</h2>
+            <Link
+              href="/products"
+              className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+            >
+              View all &rarr;
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+            {featuredProducts.map((product: Product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Category Section */}
+      {categories.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Shop by Category</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+            {categories.map((category: Category) => (
+              <Link
+                key={category.id}
+                href={`/category/${category.slug || category.id}`}
+                className="p-4 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:shadow-sm text-center transition-all group"
+              >
+                <span className="block font-medium text-slate-800 group-hover:text-indigo-600 truncate">
+                  {category.name}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Latest Catalog Grid */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Latest Arrivals</h2>
+          <Link
+            href="/products"
+            className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
+          >
+            Explore catalog &rarr;
+          </Link>
+        </div>
+        {recentProducts.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
+            {recentProducts.map((product: Product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        ) : (
+          <div className="p-12 text-center border border-dashed border-slate-200 rounded-xl bg-white">
+            <p className="text-slate-500">No products found at the moment.</p>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
