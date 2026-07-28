@@ -9,10 +9,10 @@ class Settings(BaseSettings):
 
     SMTP_HOST: str = "sandbox.smtp.mailtrap.io"
     SMTP_PORT: int = 587
-    SMTP_USERNAME: str = "PLACEHOLDER_USERNAME"
-    SMTP_PASSWORD: str = "PLACEHOLDER_PASSWORD"
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
     FROM_EMAIL: str = "no-reply@yourapp.com"
-    FRONTEND_URL: str = "https://yourapp.com"
+    FRONTEND_URL: str = "http://localhost:3000"
 
     STRIPE_SECRET_KEY: str
     STRIPE_WEBHOOK_SECRET: str

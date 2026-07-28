@@ -155,13 +155,18 @@ export async function forgotPassword(
   }
 }
 
+// File: frontend/lib/api/auth.ts  (only the resetPassword function needs replacing)
 // POST /customer/auth/reset-password
 export async function resetPassword(
   data: ResetPasswordSchemaType,
   signal?: AbortSignal
 ): Promise<{ message: string }> {
   try {
-    return await apiClient.post("/customer/auth/reset-password", data, { signal });
+    return await apiClient.post(
+      "/customer/auth/reset-password",
+      { token: data.token, new_password: data.password },
+      { signal }
+    );
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.resetPassword);
   }

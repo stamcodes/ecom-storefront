@@ -1,6 +1,7 @@
+// File: frontend/app/(auth)/login/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -13,9 +14,24 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/account";
+  const justRegistered = searchParams.get("registered") === "true";
   const login = useAuthStore((state) => state.login);
   const isLoading = useAuthStore((state) => state.isLoading);
   const [formError, setFormError] = useState<string | null>(null);
+  const [justVerified, setJustVerified] = useState(false);
+
+  useEffect(() => {
+    // Read the same-session flag set by verify-email/page.tsx immediately after
+    // a real, successful API verification. Query params are never trusted for
+    // this, since ?verified=true could be typed into the address bar by anyone.
+    if (typeof window !== "undefined") {
+      const flag = sessionStorage.getItem("emailJustVerified");
+      if (flag === "true") {
+        setJustVerified(true);
+        sessionStorage.removeItem("emailJustVerified"); // one-time use only
+      }
+    }
+  }, []);
 
   const {
     register,
@@ -48,6 +64,18 @@ export default function LoginPage() {
             Welcome back! Please enter your details to log in.
           </p>
         </div>
+
+        {justVerified && (
+          <div className="rounded-md bg-green-50 px-4 py-3 text-sm text-green-700" role="status">
+            Email verified, enter credentials to login.
+          </div>
+        )}
+
+        {justRegistered && !justVerified && (
+          <div className="rounded-md bg-blue-50 px-4 py-3 text-sm text-blue-700" role="status">
+            Account created. Please verify your email before logging in.
+          </div>
+        )}
 
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           {formError && (

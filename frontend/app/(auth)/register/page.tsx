@@ -1,3 +1,4 @@
+// File: frontend/app/(auth)/register/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -27,7 +28,9 @@ export default function RegisterPage() {
     setFormError(null);
     try {
       await registerUser(data);
-      router.replace("/login?registered=true");
+      // Redirect to the dedicated "verification link sent" screen,
+      // passing the email so it can be shown / used for resend.
+      router.replace(`/verify-email?pending=true&email=${encodeURIComponent(data.email)}`);
     } catch (error) {
       if (error instanceof ApiError) {
         setFormError(error.message);

@@ -33,7 +33,7 @@ export function proxy(request: NextRequest) {
   }
 
   if (isAuthPage && hasSession) {
-    return NextResponse.redirect(new URL("/account", request.url));
+    return NextResponse.redirect(new URL("/", request.url));
   }
 
   return NextResponse.next();
