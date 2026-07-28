@@ -50,10 +50,11 @@ async function refreshAccessToken(): Promise<void> {
   }
 }
 
-interface RequestOptions extends RequestInit {
+export interface RequestOptions extends RequestInit {
   timeoutMs?: number;
   signal?: AbortSignal;
   skipAuthRetry?: boolean;
+  requiresAuth?: boolean;
 }
 
 async function parseResponseBody(response: Response): Promise<unknown> {
@@ -85,6 +86,7 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     timeoutMs = DEFAULT_TIMEOUT_MS,
     signal: externalSignal,
     skipAuthRetry,
+    requiresAuth = false,
     ...init
   } = options;
 
@@ -134,6 +136,7 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
 
     if (
       response.status === 401 &&
+      requiresAuth &&
       !skipAuthRetry &&
       endpoint !== "/customer/auth/refresh" &&
       endpoint !== "/auth/refresh"
@@ -149,14 +152,14 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     const responseData = await parseResponseBody(response);
 
     if (!response.ok) {
-      const errorData = responseData as ApiErrorResponse | null;
+      const errorData = responseData as (ApiErrorResponse & { message?: string }) | null;
       let errorMessage = "An unexpected error occurred. Please try again.";
 
       if (errorData && typeof errorData.detail === "string") {
         errorMessage = errorData.detail;
       } else if (errorData && Array.isArray(errorData.detail)) {
         errorMessage = errorData.detail.map((err) => `${err.loc.join(".")}: ${err.msg}`).join(", ");
-      } else if (errorData && errorData.message) {
+      } else if (errorData && typeof errorData.message === "string") {
         errorMessage = errorData.message;
       }
 

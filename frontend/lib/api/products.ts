@@ -1,6 +1,16 @@
 import { apiClient, ApiError } from "./client";
-import { ApiResponse, PaginatedResponse, ProductQueryParams } from "@/types/api";
+import { PaginatedResponse, ProductQueryParams } from "@/types/api";
 import { Product } from "@/types/product";
+
+// Local generic response type wrapper matching your backend API response envelope
+export interface ApiResponse<T> {
+  data: T;
+  message?: string;
+  success?: boolean;
+}
+
+// Local extension so query params safely accept 'limit'
+type ExtendedProductQueryParams = ProductQueryParams & { limit?: number };
 
 const FALLBACK_MESSAGES = {
   getProducts: "We couldn't load products right now. Please try again.",
@@ -20,7 +30,7 @@ function toUserFacingError(error: unknown, fallbackMessage: string): ApiError {
 }
 
 export async function getProducts(
-  params?: ProductQueryParams,
+  params?: ExtendedProductQueryParams,
   signal?: AbortSignal
 ): Promise<ApiResponse<PaginatedResponse<Product>>> {
   try {
@@ -35,6 +45,7 @@ export async function getProducts(
     const query = searchParams.toString() ? `?${searchParams.toString()}` : "";
     return await apiClient.get<ApiResponse<PaginatedResponse<Product>>>(`/products${query}`, {
       signal,
+      requiresAuth: false,
     });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.getProducts);
@@ -46,7 +57,10 @@ export async function getProductBySlug(
   signal?: AbortSignal
 ): Promise<ApiResponse<Product>> {
   try {
-    return await apiClient.get<ApiResponse<Product>>(`/products/slug/${slug}`, { signal });
+    return await apiClient.get<ApiResponse<Product>>(`/products/slug/${slug}`, {
+      signal,
+      requiresAuth: false,
+    });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.getProductBySlug);
   }
@@ -57,7 +71,10 @@ export async function getProductById(
   signal?: AbortSignal
 ): Promise<ApiResponse<Product>> {
   try {
-    return await apiClient.get<ApiResponse<Product>>(`/products/${id}`, { signal });
+    return await apiClient.get<ApiResponse<Product>>(`/products/${id}`, {
+      signal,
+      requiresAuth: false,
+    });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.getProductById);
   }
@@ -65,7 +82,10 @@ export async function getProductById(
 
 export async function getCategories(signal?: AbortSignal): Promise<ApiResponse<string[]>> {
   try {
-    return await apiClient.get<ApiResponse<string[]>>("/products/categories", { signal });
+    return await apiClient.get<ApiResponse<string[]>>("/products/categories", {
+      signal,
+      requiresAuth: false,
+    });
   } catch (error) {
     throw toUserFacingError(error, FALLBACK_MESSAGES.getCategories);
   }

@@ -1,34 +1,30 @@
 import Link from "next/link";
-import { getProducts } from "@/lib/api/products";
-import { getCategories } from "@/lib/api/categories";
+import { getProducts, getCategories } from "@/lib/api/products";
 import { ProductCard } from "@/components/features/product/productCard";
-
-interface Product {
-  id: string | number;
-  name: string;
-  slug?: string;
-  price: number;
-  image_url?: string;
-  category_name?: string;
-}
-
-interface Category {
-  id: string | number;
-  name: string;
-  slug?: string;
-}
+import { Product } from "@/types/product";
 
 export default async function HomePage() {
   let products: Product[] = [];
-  let categories: Category[] = [];
+  let categories: string[] = [];
 
   try {
     const [productsRes, categoriesRes] = await Promise.all([
       getProducts({ limit: 12 }),
       getCategories(),
     ]);
-    products = productsRes?.items || productsRes || [];
-    categories = categoriesRes || [];
+
+    // Extract raw array items safely from ApiResponse<PaginatedResponse<Product>>
+    const productsData = productsRes?.data;
+    if (productsData && "items" in productsData && Array.isArray(productsData.items)) {
+      products = productsData.items;
+    } else if (Array.isArray(productsData)) {
+      products = productsData;
+    }
+
+    // Extract categories string array safely from ApiResponse<string[]>
+    if (Array.isArray(categoriesRes?.data)) {
+      categories = categoriesRes.data;
+    }
   } catch (error) {
     console.error("Failed to load homepage data:", error);
   }
@@ -87,14 +83,14 @@ export default async function HomePage() {
         <section className="space-y-4">
           <h2 className="text-2xl font-bold tracking-tight text-slate-900">Shop by Category</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-            {categories.map((category: Category) => (
+            {categories.map((category: string) => (
               <Link
-                key={category.id}
-                href={`/category/${category.slug || category.id}`}
+                key={category}
+                href={`/category/${encodeURIComponent(category.toLowerCase())}`}
                 className="p-4 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:shadow-sm text-center transition-all group"
               >
-                <span className="block font-medium text-slate-800 group-hover:text-indigo-600 truncate">
-                  {category.name}
+                <span className="block font-medium text-slate-800 group-hover:text-indigo-600 truncate capitalize">
+                  {category}
                 </span>
               </Link>
             ))}
