@@ -75,10 +75,22 @@ export async function refreshToken(signal?: AbortSignal): Promise<{ message: str
 // POST /customer/auth/logout
 export async function logout(signal?: AbortSignal): Promise<{ message: string }> {
   try {
-    return await apiClient.post("/customer/auth/logout", {}, { signal });
-  } catch (error) {
-    throw toUserFacingError(error, FALLBACK_MESSAGES.logout);
+    // 1. Invalidate session on FastAPI backend
+    await apiClient.post("/customer/auth/logout", {}, { signal }).catch(() => {});
+  } catch {
+    // Ignore backend connection errors on logout
   }
+
+  try {
+    // 2. Clear Next.js cookies on frontend server/middleware context
+    if (typeof window !== "undefined") {
+      await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    }
+  } catch {
+    // Ignore frontend route errors
+  }
+
+  return { message: "Logged out successfully" };
 }
 
 export async function getCurrentUser(signal?: AbortSignal): Promise<CustomerProfile> {

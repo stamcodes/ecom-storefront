@@ -17,6 +17,25 @@ interface AuthState {
   clearAuth: () => void;
 }
 
+function clearClientCookies() {
+  if (typeof document !== "undefined") {
+    const cookiesToClear = ["access_token", "refresh_token", "session", "token"];
+    const paths = ["/", "/account", "/api"];
+    const hostname = window.location.hostname;
+    const domains = [hostname, "." + hostname];
+
+    cookiesToClear.forEach((name) => {
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+      paths.forEach((path) => {
+        document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=${path};`;
+        domains.forEach((domain) => {
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=${path}; domain=${domain};`;
+        });
+      });
+    });
+  }
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
@@ -52,6 +71,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch {
       // Ignore failures — clear local state regardless.
     }
+    clearClientCookies();
+    if (typeof window !== "undefined") {
+      localStorage.clear();
+      sessionStorage.clear();
+    }
     set({ user: null, isAuthenticated: false, isInitialized: true });
   },
 
@@ -67,5 +91,12 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   setUser: (user: CustomerProfile) => set({ user }),
 
-  clearAuth: () => set({ user: null, isAuthenticated: false }),
+  clearAuth: () => {
+    clearClientCookies();
+    if (typeof window !== "undefined") {
+      localStorage.clear();
+      sessionStorage.clear();
+    }
+    set({ user: null, isAuthenticated: false, isInitialized: true });
+  },
 }));

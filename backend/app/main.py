@@ -58,8 +58,15 @@ ROUTERS = [
     (customer_order_router, "Customer Orders"),
 ]
 
+from fastapi import APIRouter
+
+api_v1_router = APIRouter(prefix="/api/v1")
+
 for router, tag in ROUTERS:
+    api_v1_router.include_router(router, tags=[tag])
     app.include_router(router, tags=[tag])
+
+app.include_router(api_v1_router)
 
 
 @app.on_event("startup")
