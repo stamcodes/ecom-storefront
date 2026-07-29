@@ -1,125 +1,369 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
-import { getProducts, getCategories } from "@/lib/api/products";
+import { Button } from "@/components/ui/button";
 import { ProductCard } from "@/components/features/product/productCard";
-import { Product } from "@/types/product";
 
-export default async function HomePage() {
-  let products: Product[] = [];
-  let categories: string[] = [];
+interface MockProduct {
+  id: number;
+  name: string;
+  slug: string;
+  price: number;
+  image_url: string;
+  category_name: string;
+  rating: number;
+  reviewCount: number;
+}
 
-  try {
-    const [productsRes, categoriesRes] = await Promise.all([
-      getProducts({ limit: 12 }),
-      getCategories(),
-    ]);
+const PRODUCTS: MockProduct[] = [
+  {
+    id: 1,
+    name: "Aria Wireless Headphones",
+    slug: "aria-wireless-headphones",
+    price: 89.99,
+    image_url: "https://picsum.photos/seed/prod1/600/600",
+    category_name: "Electronics",
+    rating: 4.5,
+    reviewCount: 214,
+  },
+  {
+    id: 2,
+    name: "Nordic Ceramic Mug Set",
+    slug: "nordic-ceramic-mug-set",
+    price: 34.5,
+    image_url: "https://picsum.photos/seed/prod2/600/600",
+    category_name: "Home",
+    rating: 4.8,
+    reviewCount: 96,
+  },
+  {
+    id: 3,
+    name: "Trailblaze Running Shoes",
+    slug: "trailblaze-running-shoes",
+    price: 64.0,
+    image_url: "https://picsum.photos/seed/prod3/600/600",
+    category_name: "Footwear",
+    rating: 4.2,
+    reviewCount: 358,
+  },
+  {
+    id: 4,
+    name: "Lumen Desk Lamp",
+    slug: "lumen-desk-lamp",
+    price: 42.99,
+    image_url: "https://picsum.photos/seed/prod4/600/600",
+    category_name: "Home",
+    rating: 4.6,
+    reviewCount: 71,
+  },
+  {
+    id: 5,
+    name: "Voyager Backpack 28L",
+    slug: "voyager-backpack-28l",
+    price: 76.0,
+    image_url: "https://picsum.photos/seed/prod5/600/600",
+    category_name: "Bags",
+    rating: 4.7,
+    reviewCount: 132,
+  },
+  {
+    id: 6,
+    name: "Pulse Fitness Tracker",
+    slug: "pulse-fitness-tracker",
+    price: 129.99,
+    image_url: "https://picsum.photos/seed/prod6/600/600",
+    category_name: "Electronics",
+    rating: 4.3,
+    reviewCount: 480,
+  },
+  {
+    id: 7,
+    name: "Meadow Cotton Throw Blanket",
+    slug: "meadow-cotton-throw-blanket",
+    price: 28.75,
+    image_url: "https://picsum.photos/seed/prod7/600/600",
+    category_name: "Home",
+    rating: 4.9,
+    reviewCount: 58,
+  },
+  {
+    id: 8,
+    name: "Orbit Bluetooth Speaker",
+    slug: "orbit-bluetooth-speaker",
+    price: 54.0,
+    image_url: "https://picsum.photos/seed/prod8/600/600",
+    category_name: "Electronics",
+    rating: 4.1,
+    reviewCount: 267,
+  },
+  {
+    id: 9,
+    name: "Cascade Rain Jacket",
+    slug: "cascade-rain-jacket",
+    price: 98.5,
+    image_url: "https://picsum.photos/seed/prod9/600/600",
+    category_name: "Apparel",
+    rating: 4.4,
+    reviewCount: 145,
+  },
+  {
+    id: 10,
+    name: "Basecamp Enamel Cookware Set",
+    slug: "basecamp-enamel-cookware-set",
+    price: 112.0,
+    image_url: "https://picsum.photos/seed/prod10/600/600",
+    category_name: "Kitchen",
+    rating: 4.6,
+    reviewCount: 89,
+  },
+];
 
-    // Extract raw array items safely from ApiResponse<PaginatedResponse<Product>>
-    const productsData = productsRes?.data;
-    if (productsData && "items" in productsData && Array.isArray(productsData.items)) {
-      products = productsData.items;
-    } else if (Array.isArray(productsData)) {
-      products = productsData;
-    }
+function rotate(arr: MockProduct[], by: number): MockProduct[] {
+  return [...arr.slice(by), ...arr.slice(0, by)];
+}
 
-    // Extract categories string array safely from ApiResponse<string[]>
-    if (Array.isArray(categoriesRes?.data)) {
-      categories = categoriesRes.data;
-    }
-  } catch (error) {
-    console.error("Failed to load homepage data:", error);
-  }
+const CATEGORY_ROWS: {
+  title: string;
+  href: string;
+  products: MockProduct[];
+  featured?: boolean;
+}[] = [
+  { title: "Featured picks", href: "/products", products: rotate(PRODUCTS, 0), featured: true },
+  { title: "Electronics", href: "/category/electronics", products: rotate(PRODUCTS, 3) },
+  { title: "Home essentials", href: "/category/home", products: rotate(PRODUCTS, 6) },
+  { title: "Apparel and footwear", href: "/category/apparel", products: rotate(PRODUCTS, 2) },
+  { title: "New arrivals", href: "/products", products: rotate(PRODUCTS, 5) },
+];
 
-  const featuredProducts = products.slice(0, 3);
-  const recentProducts = products.slice(3, 11);
+const NAV_LINKS = [
+  { label: "Shop", href: "/products" },
+  { label: "Categories", href: "/categories" },
+  { label: "Deals", href: "/products" },
+  { label: "About", href: "/about" },
+  { label: "Contact", href: "/contact" },
+];
+
+function Navbar() {
+  return (
+    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-[#10151F]/10">
+      <div className="max-w-7xl mx-auto px-6 md:px-10 h-16 flex items-center justify-between gap-6">
+        <Link href="/" className="text-lg font-bold tracking-tight text-[#10151F] shrink-0">
+          Marketplace<span className="text-[#1F6F63]">.</span>
+        </Link>
+
+        <nav className="hidden md:flex items-center gap-6">
+          {NAV_LINKS.map((link) => (
+            <Link
+              key={link.label}
+              href={link.href}
+              className="text-sm font-medium text-[#10151F]/70 hover:text-[#1F6F63] transition-colors"
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+
+        <div className="hidden lg:flex flex-1 max-w-md">
+          <input
+            type="text"
+            placeholder="Search products, brands, categories"
+            className="w-full bg-[#F6F5F1] border border-[#10151F]/12 rounded-full px-4 py-2 text-sm placeholder:text-[#10151F]/40 focus:outline-none focus:ring-2 focus:ring-[#E8A23D]"
+          />
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0">
+          <Link
+            href="/login"
+            className="hidden sm:inline text-sm font-medium text-[#10151F]/70 hover:text-[#1F6F63] transition-colors"
+          >
+            Sign in
+          </Link>
+          <Link href="/cart" className="relative">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+            >
+              <circle cx="9" cy="21" r="1" />
+              <circle cx="20" cy="21" r="1" />
+              <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+            </svg>
+            <span className="absolute -top-2 -right-2 bg-[#1F6F63] text-white text-[10px] font-semibold rounded-full w-4 h-4 flex items-center justify-center">
+              3
+            </span>
+          </Link>
+          <Link href="/register">
+            <Button className="bg-[#10151F] hover:bg-[#1F6F63] text-white text-sm font-semibold rounded-full px-5">
+              Sign up
+            </Button>
+          </Link>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function CategoryRow({
+  title,
+  href,
+  products,
+  featured,
+}: {
+  title: string;
+  href: string;
+  products: MockProduct[];
+  featured?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const firstRow = products.slice(0, 5);
+  const secondRow = products.slice(5, 10);
+  const showSecondRow = featured || expanded;
 
   return (
-    <div className="space-y-12">
-      {/* Hero Section */}
-      <section className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-8 md:p-12 shadow-xl">
-        <div className="max-w-3xl space-y-4">
-          <span className="text-xs font-semibold tracking-wider text-indigo-400 uppercase">
-            Featured Collection
-          </span>
-          <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight">
-            Discover Premium Products for Your Modern Lifestyle
-          </h1>
-          <p className="text-slate-300 text-lg">
-            Explore our curated catalog of high-quality goods, exclusive deals, and fast delivery
-            directly to your doorstep.
-          </p>
-          <div className="pt-2">
+    <section className="max-w-7xl mx-auto px-6 md:px-10 py-10">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold">{title}</h2>
+        <Link href={href} className="text-sm font-semibold text-[#1F6F63] hover:underline">
+          View all
+        </Link>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+        {firstRow.map((product) => (
+          <ProductCard key={`${title}-${product.id}`} product={product} />
+        ))}
+      </div>
+
+      {showSecondRow && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mt-4">
+          {secondRow.map((product) => (
+            <ProductCard key={`${title}-${product.id}`} product={product} />
+          ))}
+        </div>
+      )}
+
+      {!featured && (
+        <div className="flex flex-col items-center gap-3 mt-6">
+          <Button
+            onClick={() => setExpanded((prev) => !prev)}
+            className="bg-[#1F6F63] hover:bg-[#18574d] text-white text-sm font-semibold rounded-full px-6"
+          >
+            {expanded ? "Show less" : "Show more"}
+          </Button>
+          {expanded && (
             <Link
-              href="/products"
-              className="inline-block bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-6 py-3 rounded-lg transition-colors shadow-md"
+              href="/categories"
+              className="text-sm font-semibold text-[#10151F]/70 hover:text-[#1F6F63] transition-colors"
             >
-              Shop All Products
+              View more similar products &rarr;
             </Link>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+export default function HomePage() {
+  const categories = Array.from(new Set(PRODUCTS.map((p) => p.category_name)));
+
+  return (
+    <div className="bg-[#F6F5F1] text-[#10151F]">
+      <Navbar />
+
+      {/* Hero */}
+      <section className="border-b border-[#10151F]/10">
+        <div className="max-w-4xl mx-auto px-6 md:px-10 pt-16 pb-14 flex flex-col items-center text-center gap-6">
+          <span className="text-xs font-semibold tracking-[0.18em] uppercase text-[#1F6F63]">
+            Everything, one storefront
+          </span>
+          <h1 className="text-[2.75rem] md:text-6xl font-bold leading-[0.95] tracking-tight">
+            Whatever you're
+            <br />
+            looking for is
+            <br />
+            already here.
+          </h1>
+          <p className="text-[#10151F]/70 text-base max-w-md">
+            Thousands of products across every category — electronics to essentials, restocked
+            daily, shipped fast.
+          </p>
+
+          <form action="/search" className="flex items-stretch w-full max-w-lg pt-2">
+            <input
+              type="text"
+              name="q"
+              placeholder="Search products, brands, categories"
+              className="flex-1 bg-white border border-[#10151F]/15 rounded-l-lg px-4 py-3 text-sm placeholder:text-[#10151F]/40 focus:outline-none focus:ring-2 focus:ring-[#E8A23D]"
+            />
+            <button
+              type="submit"
+              className="bg-[#10151F] text-white text-sm font-semibold px-6 rounded-r-lg hover:bg-[#1F6F63] transition-colors"
+            >
+              Search
+            </button>
+          </form>
+
+          <div className="flex flex-wrap justify-center gap-2 pt-2">
+            {categories.map((category) => (
+              <Link
+                key={category}
+                href={`/category/${encodeURIComponent(category.toLowerCase())}`}
+                className="rounded-full px-4 py-2 text-sm font-medium bg-[#1F6F63] text-white hover:bg-[#18574d] transition-colors"
+              >
+                {category}
+              </Link>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* Featured Items Grid */}
-      {featuredProducts.length > 0 && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900">Featured Items</h2>
-            <Link
-              href="/products"
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
-            >
-              View all &rarr;
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-            {featuredProducts.map((product: Product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Category Section */}
-      {categories.length > 0 && (
-        <section className="space-y-4">
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Shop by Category</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-            {categories.map((category: string) => (
-              <Link
-                key={category}
-                href={`/category/${encodeURIComponent(category.toLowerCase())}`}
-                className="p-4 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:shadow-sm text-center transition-all group"
-              >
-                <span className="block font-medium text-slate-800 group-hover:text-indigo-600 truncate capitalize">
-                  {category}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Latest Catalog Grid */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Latest Arrivals</h2>
-          <Link
-            href="/products"
-            className="text-sm font-medium text-indigo-600 hover:text-indigo-500"
-          >
-            Explore catalog &rarr;
-          </Link>
+      {/* Trust strip */}
+      <section className="border-b border-[#10151F]/10 bg-white">
+        <div className="max-w-7xl mx-auto px-6 md:px-10 py-4 flex flex-wrap justify-center gap-x-10 gap-y-2 text-xs font-medium text-[#10151F]/70">
+          <span>Free shipping over $50</span>
+          <span>30-day returns</span>
+          <span>Secure checkout</span>
+          <span>24/7 support</span>
         </div>
-        {recentProducts.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
-            {recentProducts.map((product: Product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
+      </section>
+
+      {/* Category rows */}
+      {CATEGORY_ROWS.map((row) => (
+        <CategoryRow
+          key={row.title}
+          title={row.title}
+          href={row.href}
+          products={row.products}
+          featured={row.featured}
+        />
+      ))}
+
+      {/* Footer band */}
+      <section className="bg-[#10151F] text-white">
+        <div className="max-w-7xl mx-auto px-6 md:px-10 py-10 flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left">
+          <div>
+            <h3 className="text-lg font-bold">Get 10% off your first order</h3>
+            <p className="text-white/60 text-sm">Join our newsletter for deals and new arrivals.</p>
           </div>
-        ) : (
-          <div className="p-12 text-center border border-dashed border-slate-200 rounded-xl bg-white">
-            <p className="text-slate-500">No products found at the moment.</p>
-          </div>
-        )}
+          <form className="flex items-stretch w-full max-w-sm">
+            <input
+              type="email"
+              placeholder="you@example.com"
+              className="flex-1 bg-white/10 border border-white/20 rounded-l-lg px-4 py-3 text-sm text-white placeholder:text-white/40 focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="bg-[#E8A23D] text-[#10151F] text-sm font-semibold px-6 rounded-r-lg hover:bg-[#f0b25a] transition-colors"
+            >
+              Subscribe
+            </button>
+          </form>
+        </div>
       </section>
     </div>
   );

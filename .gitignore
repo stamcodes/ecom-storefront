@@ -48,6 +48,7 @@ next-env.d.ts
 backend/venv/
 backend/env/
 backend/.venv/
+backend/.env.test
 
 # alembic (keep versions, ignore local db files)
 *.sqlite3
