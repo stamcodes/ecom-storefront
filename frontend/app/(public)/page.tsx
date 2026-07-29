@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ProductCard } from "@/components/features/product/productCard";
 
@@ -144,7 +145,127 @@ const NAV_LINKS = [
   { label: "Contact", href: "/contact" },
 ];
 
-function Navbar() {
+/* ---------- Navigation loader ---------- */
+function useNavLoader() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  const navigate = (href: string) => {
+    setLoading(true);
+    router.push(href);
+  };
+
+  useEffect(() => {
+    if (!loading) return;
+    const timeout = setTimeout(() => setLoading(false), 5000);
+    return () => clearTimeout(timeout);
+  }, [loading]);
+
+  return { loading, navigate };
+}
+
+function TopLoader({ active }: { active: boolean }) {
+  if (!active) return null;
+  return (
+    <div className="fixed top-0 left-0 right-0 z-[100] h-[3px] bg-transparent overflow-hidden">
+      <div className="h-full w-1/3 bg-[#1F6F63] animate-[loaderSlide_0.9s_ease-in-out_infinite] rounded-full" />
+      <style jsx>{`
+        @keyframes loaderSlide {
+          0% {
+            transform: translateX(-100%);
+          }
+          50% {
+            transform: translateX(150%);
+          }
+          100% {
+            transform: translateX(300%);
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ---------- Search with autosuggest ---------- */
+function SearchBar({ className }: { className?: string }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const matches = useMemo(() => {
+    if (!query.trim()) return [];
+    const q = query.trim().toLowerCase();
+    return PRODUCTS.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 6);
+  }, [query]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div ref={wrapperRef} className={`relative ${className ?? ""}`}>
+      <form action="/search" className="flex items-stretch w-full">
+        <input
+          type="text"
+          name="q"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => query && setOpen(true)}
+          placeholder="Search products, brands, categories"
+          autoComplete="off"
+          className="flex-1 bg-white border border-[#10151F]/15 rounded-l-lg px-4 py-3 text-sm placeholder:text-[#10151F]/40 focus:outline-none focus:ring-2 focus:ring-[#E8A23D]"
+        />
+        <button
+          type="submit"
+          className="bg-[#10151F] text-white text-sm font-semibold px-6 rounded-r-lg hover:bg-[#1F6F63] transition-colors"
+        >
+          Search
+        </button>
+      </form>
+
+      {open && query.trim() && (
+        <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-[#10151F]/10 rounded-lg shadow-lg overflow-hidden z-50 text-left animate-in fade-in slide-in-from-top-1 duration-150">
+          {matches.length > 0 ? (
+            matches.map((product) => (
+              <Link
+                key={product.id}
+                href={`/products/${product.slug}`}
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#F6F5F1] transition-colors"
+              >
+                <img
+                  src={product.image_url}
+                  alt={product.name}
+                  className="w-8 h-8 rounded object-cover shrink-0"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[#10151F] truncate">{product.name}</p>
+                  <p className="text-xs text-[#10151F]/50">{product.category_name}</p>
+                </div>
+                <span className="ml-auto text-sm font-semibold text-[#10151F] shrink-0">
+                  ${product.price.toFixed(2)}
+                </span>
+              </Link>
+            ))
+          ) : (
+            <div className="px-4 py-3 text-sm text-[#10151F]/50">No products found</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Navbar({ onNavigate }: { onNavigate: (href: string) => void }) {
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-[#10151F]/10">
       <div className="max-w-7xl mx-auto px-6 md:px-10 h-16 flex items-center justify-between gap-6">
@@ -165,20 +286,16 @@ function Navbar() {
         </nav>
 
         <div className="hidden lg:flex flex-1 max-w-md">
-          <input
-            type="text"
-            placeholder="Search products, brands, categories"
-            className="w-full bg-[#F6F5F1] border border-[#10151F]/12 rounded-full px-4 py-2 text-sm placeholder:text-[#10151F]/40 focus:outline-none focus:ring-2 focus:ring-[#E8A23D]"
-          />
+          <SearchBar className="w-full" />
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          <Link
-            href="/login"
+          <button
+            onClick={() => onNavigate("/login")}
             className="hidden sm:inline text-sm font-medium text-[#10151F]/70 hover:text-[#1F6F63] transition-colors"
           >
             Sign in
-          </Link>
+          </button>
           <Link href="/cart" className="relative">
             <svg
               width="22"
@@ -196,11 +313,12 @@ function Navbar() {
               3
             </span>
           </Link>
-          <Link href="/register">
-            <Button className="bg-[#10151F] hover:bg-[#1F6F63] text-white text-sm font-semibold rounded-full px-5">
-              Sign up
-            </Button>
-          </Link>
+          <Button
+            onClick={() => onNavigate("/register")}
+            className="bg-[#10151F] hover:bg-[#1F6F63] text-white text-sm font-semibold rounded-full px-5 transition-transform hover:scale-105 active:scale-95"
+          >
+            Sign up
+          </Button>
         </div>
       </div>
     </header>
@@ -227,8 +345,11 @@ function CategoryRow({
     <section className="max-w-7xl mx-auto px-6 md:px-10 py-10">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold">{title}</h2>
-        <Link href={href} className="text-sm font-semibold text-[#1F6F63] hover:underline">
-          View all
+        <Link
+          href={href}
+          className="text-sm font-semibold text-[#1F6F63] hover:underline transition-transform inline-block hover:translate-x-0.5"
+        >
+          View all &rarr;
         </Link>
       </div>
 
@@ -239,7 +360,7 @@ function CategoryRow({
       </div>
 
       {showSecondRow && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mt-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-300">
           {secondRow.map((product) => (
             <ProductCard key={`${title}-${product.id}`} product={product} />
           ))}
@@ -250,14 +371,27 @@ function CategoryRow({
         <div className="flex flex-col items-center gap-3 mt-6">
           <Button
             onClick={() => setExpanded((prev) => !prev)}
-            className="bg-[#1F6F63] hover:bg-[#18574d] text-white text-sm font-semibold rounded-full px-6"
+            className="bg-[#1F6F63] hover:bg-[#18574d] text-white text-sm font-semibold rounded-full px-6 transition-all duration-200 hover:scale-105 active:scale-95 hover:shadow-md"
           >
-            {expanded ? "Show less" : "Show more"}
+            <span className="inline-flex items-center gap-1.5">
+              {expanded ? "Show less" : "Show more"}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className={`transition-transform duration-300 ${expanded ? "rotate-180" : ""}`}
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </span>
           </Button>
           {expanded && (
             <Link
               href="/categories"
-              className="text-sm font-semibold text-[#10151F]/70 hover:text-[#1F6F63] transition-colors"
+              className="text-sm font-semibold text-[#10151F]/70 hover:text-[#1F6F63] transition-all hover:translate-x-0.5 animate-in fade-in duration-300"
             >
               View more similar products &rarr;
             </Link>
@@ -270,10 +404,12 @@ function CategoryRow({
 
 export default function HomePage() {
   const categories = Array.from(new Set(PRODUCTS.map((p) => p.category_name)));
+  const { loading, navigate } = useNavLoader();
 
   return (
     <div className="bg-[#F6F5F1] text-[#10151F]">
-      <Navbar />
+      <TopLoader active={loading} />
+      <Navbar onNavigate={navigate} />
 
       {/* Hero */}
       <section className="border-b border-[#10151F]/10">
@@ -293,27 +429,14 @@ export default function HomePage() {
             daily, shipped fast.
           </p>
 
-          <form action="/search" className="flex items-stretch w-full max-w-lg pt-2">
-            <input
-              type="text"
-              name="q"
-              placeholder="Search products, brands, categories"
-              className="flex-1 bg-white border border-[#10151F]/15 rounded-l-lg px-4 py-3 text-sm placeholder:text-[#10151F]/40 focus:outline-none focus:ring-2 focus:ring-[#E8A23D]"
-            />
-            <button
-              type="submit"
-              className="bg-[#10151F] text-white text-sm font-semibold px-6 rounded-r-lg hover:bg-[#1F6F63] transition-colors"
-            >
-              Search
-            </button>
-          </form>
+          <SearchBar className="w-full max-w-lg pt-2" />
 
           <div className="flex flex-wrap justify-center gap-2 pt-2">
             {categories.map((category) => (
               <Link
                 key={category}
                 href={`/category/${encodeURIComponent(category.toLowerCase())}`}
-                className="rounded-full px-4 py-2 text-sm font-medium bg-[#1F6F63] text-white hover:bg-[#18574d] transition-colors"
+                className="rounded-full px-4 py-2 text-sm font-medium bg-[#1F6F63] text-white hover:bg-[#18574d] transition-all hover:scale-105 active:scale-95"
               >
                 {category}
               </Link>
